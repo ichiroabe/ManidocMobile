@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <link rel="stylesheet" href="https://uicdn.toast.com/editor/latest/toastui-editor.min.css">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; background: #fff; }
+    #editor { height: 100vh; }
+    .toastui-editor-defaultUI { height: 100% !important; border: none !important; }
+    .toastui-editor-toolbar { border-bottom: 1px solid #e0e0e0 !important; }
+    .toastui-editor-md-container,
+    .toastui-editor-ww-container { font-size: 15px; line-height: 1.7; }
+    /* モバイル用ツールバー調整 */
+    .toastui-editor-toolbar-item-wrapper button {
+      width: 36px !important;
+      height: 36px !important;
+    }
+  </style>
+</head>
+<body>
+  <div id="editor"></div>
+  <script src="https://uicdn.toast.com/editor/latest/toastui-editor-all.min.js"></script>
+  <script>
+    var editor = null;
+    var readOnly = false;
+
+    function initEditor(markdown, isReadOnly) {
+      readOnly = isReadOnly;
+
+      if (editor) {
+        editor.destroy();
+      }
+
+      if (isReadOnly) {
+        editor = new toastui.Editor.factory({
+          el: document.querySelector('#editor'),
+          viewer: true,
+          initialValue: markdown || '',
+        });
+        return;
+      }
+
+      editor = new toastui.Editor({
+        el: document.querySelector('#editor'),
+        height: '100%',
+        initialEditType: 'wysiwyg',
+        initialValue: markdown || '',
+        toolbarItems: [
+          ['heading', 'bold', 'italic', 'strike'],
+          ['hr', 'quote'],
+          ['ul', 'ol', 'task'],
+          ['table', 'link'],
+          ['code', 'codeblock'],
+        ],
+        hideModeSwitch: true,
+      });
+
+      editor.on('change', function () {
+        if (window.ContentChanged) {
+          ContentChanged.postMessage('changed');
+        }
+      });
+    }
+
+    function getMarkdown() {
+      if (!editor || readOnly) return '';
+      return editor.getMarkdown();
+    }
+
+    function setMarkdown(markdown) {
+      if (!editor || readOnly) return;
+      editor.setMarkdown(markdown || '');
+    }
+  </script>
+</body>
+</html>

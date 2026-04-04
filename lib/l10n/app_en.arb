@@ -1,0 +1,108 @@
+{
+  "@@locale": "en",
+
+  "appTitle": "Manidoc",
+  "settings": "Settings",
+  "account": "Account",
+  "signOut": "Sign Out",
+  "signIn": "Sign in with Google",
+  "signInFailed": "Sign-in failed",
+
+  "workspace": "Workspace",
+  "addWorkspace": "Add",
+  "addWorkspaceTitle": "Add Workspace",
+  "noWorkspace": "No workspaces",
+  "addWorkspaceButton": "Add workspace",
+  "deleteWorkspace": "Delete",
+  "deleteWorkspaceMessage": "Delete \"{name}\"?\n(Data on Google Drive will not be deleted)",
+  "@deleteWorkspaceMessage": {
+    "placeholders": {
+      "name": { "type": "String" }
+    }
+  },
+  "windowsFolder": "Windows folder (read-only)",
+  "androidFolder": "Android folder (read-write)",
+  "androidFolderHint": "※ If not selected, an _android folder will be created automatically inside the Windows folder.",
+  "selectFolder": "Select folder",
+  "myDrive": "My Drive",
+  "noFolder": "No folders",
+  "newFolder": "New folder",
+  "newFolderName": "Folder name",
+  "createFolder": "Create",
+
+  "windowsTab": "Windows",
+  "androidTab": "Android",
+  "noProject": "No projects",
+  "noProjectAndroid": "No projects yet",
+  "createProjectButton": "Create",
+  "newProject": "New Project",
+  "newProjectFab": "New Project",
+  "projectName": "Project name",
+  "renameProject": "Rename",
+  "deleteProject": "Delete",
+  "deleteProjectMessage": "Delete \"{name}\"?\n(The file on Google Drive will also be deleted)",
+  "@deleteProjectMessage": {
+    "placeholders": {
+      "name": { "type": "String" }
+    }
+  },
+  "readOnly": "Read only",
+
+  "addNode": "Add root node",
+  "addNodeTitle": "Add node",
+  "nodeTitle": "Title",
+  "noNode": "No nodes",
+  "addNodeButton": "Add node",
+  "addChildNode": "Add child node",
+  "deleteNode": "Delete",
+  "deleteNodeTitle": "Delete",
+  "deleteNodeMessage": "Delete \"{title}\"?\nAll child nodes will also be deleted.",
+  "@deleteNodeMessage": {
+    "placeholders": {
+      "title": { "type": "String" }
+    }
+  },
+
+  "save": "Save",
+  "cancel": "Cancel",
+  "add": "Add",
+  "delete": "Delete",
+  "change": "Change",
+  "execute": "Execute",
+  "search": "Search",
+  "close": "Close",
+
+  "aiAssistant": "AI Assistant",
+  "aiContinue": "Continue writing",
+  "aiSummarize": "Summarize",
+  "aiRefine": "Improve",
+  "aiWebSearch": "Search & Answer",
+  "aiSearchHint": "Enter search query or question",
+  "aiCustom": "Custom instruction",
+  "aiCustomHint": "Enter custom instruction",
+  "aiInsert": "Insert into article",
+
+  "geminiApiKey": "Gemini API Key",
+  "geminiApiKeyHint": "Get it from Google AI Studio",
+  "apiKeyLabel": "API Key",
+  "geminiModel": "Model name",
+  "apiKeySaved": "Settings saved",
+  "language": "Language",
+  "languageJa": "日本語",
+  "languageEn": "English",
+
+  "aiAgent": "AI Agent",
+  "aiAgentTab": "AI Agent",
+  "aiAgentGreeting": "Hello! Let's plan your project together. What kind of document would you like to create?",
+  "aiAgentInputHint": "Type a message...",
+  "aiAgentThinking": "Thinking...",
+  "aiAgentError": "An error occurred",
+  "aiAgentNoApiKey": "Gemini API key is not set. Please enter it in Settings.",
+  "aiAgentWebSearch": "Web Search",
+  "aiAgentWebSearchOn": "🔍 Web search enabled",
+  "aiAgentWebSearchOff": "Web search disabled",
+  "aiAgentMdMode": "Markdown output",
+  "aiAgentClear": "Clear chat",
+  "aiAgentCreateProject": "Create project from this Markdown",
+  "aiAgentProjectCreated": "Project created"
+}

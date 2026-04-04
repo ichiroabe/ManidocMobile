@@ -1,0 +1,108 @@
+{
+  "@@locale": "ja",
+
+  "appTitle": "Manidoc",
+  "settings": "設定",
+  "account": "アカウント",
+  "signOut": "サインアウト",
+  "signIn": "Googleでサインイン",
+  "signInFailed": "サインインに失敗しました",
+
+  "workspace": "ワークスペース",
+  "addWorkspace": "追加",
+  "addWorkspaceTitle": "ワークスペースを追加",
+  "noWorkspace": "ワークスペースがありません",
+  "addWorkspaceButton": "追加する",
+  "deleteWorkspace": "削除確認",
+  "deleteWorkspaceMessage": "「{name}」を削除しますか？\n（Google Drive 上のデータは削除されません）",
+  "@deleteWorkspaceMessage": {
+    "placeholders": {
+      "name": { "type": "String" }
+    }
+  },
+  "windowsFolder": "Windowsフォルダ（読み取り専用）",
+  "androidFolder": "Androidフォルダ（読み書き）",
+  "androidFolderHint": "※ 未選択の場合、Windowsフォルダ内に _android フォルダを自動作成します",
+  "selectFolder": "フォルダを選ぶ",
+  "myDrive": "マイドライブ",
+  "noFolder": "フォルダがありません",
+  "newFolder": "新しいフォルダ",
+  "newFolderName": "フォルダ名",
+  "createFolder": "作成",
+
+  "windowsTab": "Windows",
+  "androidTab": "Android",
+  "noProject": "プロジェクトがありません",
+  "noProjectAndroid": "まだプロジェクトがありません",
+  "createProjectButton": "作成する",
+  "newProject": "新規プロジェクト",
+  "newProjectFab": "新規プロジェクト",
+  "projectName": "プロジェクト名",
+  "renameProject": "名前を変更",
+  "deleteProject": "削除",
+  "deleteProjectMessage": "「{name}」を削除しますか？\n（Google Drive上のファイルも削除されます）",
+  "@deleteProjectMessage": {
+    "placeholders": {
+      "name": { "type": "String" }
+    }
+  },
+  "readOnly": "読み取り専用",
+
+  "addNode": "ルートノードを追加",
+  "addNodeTitle": "ノードを追加",
+  "nodeTitle": "タイトル",
+  "noNode": "ノードがありません",
+  "addNodeButton": "ノードを追加",
+  "addChildNode": "子ノードを追加",
+  "deleteNode": "削除",
+  "deleteNodeTitle": "削除確認",
+  "deleteNodeMessage": "「{title}」を削除しますか？\n子ノードも全て削除されます。",
+  "@deleteNodeMessage": {
+    "placeholders": {
+      "title": { "type": "String" }
+    }
+  },
+
+  "save": "保存",
+  "cancel": "キャンセル",
+  "add": "追加",
+  "delete": "削除",
+  "change": "変更",
+  "execute": "実行",
+  "search": "検索",
+  "close": "閉じる",
+
+  "aiAssistant": "AIアシスタント",
+  "aiContinue": "続きを書く",
+  "aiSummarize": "要約する",
+  "aiRefine": "改善する",
+  "aiWebSearch": "Web検索して回答",
+  "aiSearchHint": "検索クエリ・質問を入力",
+  "aiCustom": "カスタム指示",
+  "aiCustomHint": "カスタム指示を入力",
+  "aiInsert": "本文に追加",
+
+  "geminiApiKey": "Gemini API キー",
+  "geminiApiKeyHint": "Google AI Studio から取得してください",
+  "apiKeyLabel": "APIキー",
+  "geminiModel": "モデル名",
+  "apiKeySaved": "設定を保存しました",
+  "language": "言語",
+  "languageJa": "日本語",
+  "languageEn": "English",
+
+  "aiAgent": "AIエージェント",
+  "aiAgentTab": "AIエージェント",
+  "aiAgentGreeting": "こんにちは！プロジェクトの構成を一緒に考えましょう。どんなドキュメントを作りたいですか？",
+  "aiAgentInputHint": "メッセージを入力...",
+  "aiAgentThinking": "考え中...",
+  "aiAgentError": "エラーが発生しました",
+  "aiAgentNoApiKey": "Gemini APIキーが設定されていません。設定画面から入力してください。",
+  "aiAgentWebSearch": "Web検索",
+  "aiAgentWebSearchOn": "🔍 Web検索が有効になりました",
+  "aiAgentWebSearchOff": "Web検索が無効になりました",
+  "aiAgentMdMode": "Markdown出力",
+  "aiAgentClear": "チャットをクリア",
+  "aiAgentCreateProject": "このMarkdownからプロジェクトを作成",
+  "aiAgentProjectCreated": "プロジェクトを作成しました"
+}
