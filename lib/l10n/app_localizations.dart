@@ -589,6 +589,54 @@ abstract class AppLocalizations {
   /// In ja, this message translates to:
   /// **'プロジェクトを作成しました'**
   String get aiAgentProjectCreated;
+
+  /// No description provided for @settingsSectionAi.
+  ///
+  /// In ja, this message translates to:
+  /// **'画像生成 / アシスタント設定'**
+  String get settingsSectionAi;
+
+  /// No description provided for @settingsLanguageLabel.
+  ///
+  /// In ja, this message translates to:
+  /// **'言語 (Language):'**
+  String get settingsLanguageLabel;
+
+  /// No description provided for @settingsProviderLabel.
+  ///
+  /// In ja, this message translates to:
+  /// **'AIプロバイダ:'**
+  String get settingsProviderLabel;
+
+  /// No description provided for @settingsApiKeyLabel.
+  ///
+  /// In ja, this message translates to:
+  /// **'API キー:'**
+  String get settingsApiKeyLabel;
+
+  /// No description provided for @settingsModelLabel.
+  ///
+  /// In ja, this message translates to:
+  /// **'モデル名:'**
+  String get settingsModelLabel;
+
+  /// No description provided for @settingsModelListLink.
+  ///
+  /// In ja, this message translates to:
+  /// **'利用可能なモデル名を確認する'**
+  String get settingsModelListLink;
+
+  /// No description provided for @settingsEndpointLabel.
+  ///
+  /// In ja, this message translates to:
+  /// **'エンドポイント:'**
+  String get settingsEndpointLabel;
+
+  /// No description provided for @settingsApiKeyHint.
+  ///
+  /// In ja, this message translates to:
+  /// **'APIキーは Google AI Studio から取得してください。'**
+  String get settingsApiKeyHint;
 }
 
 class _AppLocalizationsDelegate

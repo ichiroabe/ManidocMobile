@@ -262,4 +262,28 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get aiAgentProjectCreated => 'Project created';
+
+  @override
+  String get settingsSectionAi => 'Image generation / Assistant';
+
+  @override
+  String get settingsLanguageLabel => 'Language:';
+
+  @override
+  String get settingsProviderLabel => 'AI Provider:';
+
+  @override
+  String get settingsApiKeyLabel => 'API Key:';
+
+  @override
+  String get settingsModelLabel => 'Model name:';
+
+  @override
+  String get settingsModelListLink => 'View available model names';
+
+  @override
+  String get settingsEndpointLabel => 'Endpoint:';
+
+  @override
+  String get settingsApiKeyHint => 'Get your API key from Google AI Studio.';
 }

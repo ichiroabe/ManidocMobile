@@ -104,5 +104,14 @@
   "aiAgentMdMode": "Markdown output",
   "aiAgentClear": "Clear chat",
   "aiAgentCreateProject": "Create project from this Markdown",
-  "aiAgentProjectCreated": "Project created"
+  "aiAgentProjectCreated": "Project created",
+
+  "settingsSectionAi": "Image generation / Assistant",
+  "settingsLanguageLabel": "Language:",
+  "settingsProviderLabel": "AI Provider:",
+  "settingsApiKeyLabel": "API Key:",
+  "settingsModelLabel": "Model name:",
+  "settingsModelListLink": "View available model names",
+  "settingsEndpointLabel": "Endpoint:",
+  "settingsApiKeyHint": "Get your API key from Google AI Studio."
 }

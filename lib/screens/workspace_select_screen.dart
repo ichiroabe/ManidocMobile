@@ -1,3 +1,5 @@
+import 'dart:io' show Platform;
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import '../models/workspace_info.dart';
 import '../services/drive_service.dart';
@@ -18,6 +20,8 @@ class _WorkspaceSelectScreenState extends State<WorkspaceSelectScreen> {
   final _driveService = DriveService();
   List<WorkspaceInfo> _workspaces = [];
   bool _loading = true;
+
+  bool get _isWindows => Platform.isWindows;
 
   @override
   void initState() {
@@ -44,6 +48,32 @@ class _WorkspaceSelectScreenState extends State<WorkspaceSelectScreen> {
   }
 
   Future<void> _addWorkspace() async {
+    if (_isWindows) {
+      await _addWorkspaceWindows();
+    } else {
+      await _addWorkspaceAndroid();
+    }
+  }
+
+  /// Windows: file_pickerでローカルフォルダを選択
+  Future<void> _addWorkspaceWindows() async {
+    final result = await FilePicker.platform.getDirectoryPath(
+      dialogTitle: 'ワークスペースフォルダを選択',
+    );
+    if (result == null) return;
+
+    // フォルダ名をワークスペース名に
+    final name = result.split(RegExp(r'[/\\]')).last;
+    final workspace = WorkspaceInfo(
+      name: name,
+      localPath: result,
+    );
+    await _workspaceService.addWorkspace(workspace);
+    _load();
+  }
+
+  /// Android: Driveフォルダピッカー
+  Future<void> _addWorkspaceAndroid() async {
     String? windowsFolderId;
     String? windowsFolderName;
     String? androidFolderId;
@@ -150,7 +180,7 @@ class _WorkspaceSelectScreenState extends State<WorkspaceSelectScreen> {
       builder: (ctx) => AlertDialog(
         title: const Text('削除確認'),
         content: Text('「${_workspaces[index].name}」を削除しますか？\n'
-            '（Google Drive 上のデータは削除されません）'),
+            '${_isWindows ? '（ローカルファイルは削除されません）' : '（Google Drive 上のデータは削除されません）'}'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
@@ -211,6 +241,10 @@ class _WorkspaceSelectScreenState extends State<WorkspaceSelectScreen> {
                     return ListTile(
                       leading: const Icon(Icons.workspaces_outlined),
                       title: Text(ws.name),
+                      subtitle: _isWindows && ws.localPath != null
+                          ? Text(ws.localPath!,
+                              style: Theme.of(context).textTheme.bodySmall)
+                          : null,
                       onTap: () => _openWorkspace(ws),
                       trailing: IconButton(
                         icon: const Icon(Icons.delete_outline),

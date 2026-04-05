@@ -260,4 +260,28 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get aiAgentProjectCreated => 'プロジェクトを作成しました';
+
+  @override
+  String get settingsSectionAi => '画像生成 / アシスタント設定';
+
+  @override
+  String get settingsLanguageLabel => '言語 (Language):';
+
+  @override
+  String get settingsProviderLabel => 'AIプロバイダ:';
+
+  @override
+  String get settingsApiKeyLabel => 'API キー:';
+
+  @override
+  String get settingsModelLabel => 'モデル名:';
+
+  @override
+  String get settingsModelListLink => '利用可能なモデル名を確認する';
+
+  @override
+  String get settingsEndpointLabel => 'エンドポイント:';
+
+  @override
+  String get settingsApiKeyHint => 'APIキーは Google AI Studio から取得してください。';
 }

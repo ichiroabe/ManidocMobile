@@ -230,6 +230,25 @@ class DriveService {
     }
   }
 
+  // フォルダ内のファイルを名前で検索してIDを返す
+  Future<String?> findFileIdByName(String folderId, String name) async {
+    final api = await _getApi();
+    if (api == null) return null;
+    try {
+      final escaped = name.replaceAll("'", "\\'");
+      final result = await api.files.list(
+        q: "'$folderId' in parents and name = '$escaped' and trashed = false",
+        $fields: 'files(id)',
+      );
+      if (result.files != null && result.files!.isNotEmpty) {
+        return result.files!.first.id;
+      }
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
   // ファイルのバイトをダウンロード
   Future<List<int>?> downloadFileBytes(String fileId) async {
     final api = await _getApi();

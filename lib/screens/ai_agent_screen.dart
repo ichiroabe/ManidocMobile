@@ -1,3 +1,4 @@
+import 'dart:io' show Platform;
 import 'package:flutter/material.dart';
 import 'package:uuid/uuid.dart';
 import '../l10n/app_localizations.dart';
@@ -5,6 +6,7 @@ import '../models/manidoc_node.dart';
 import '../models/manidoc_project.dart';
 import '../services/drive_service.dart';
 import '../services/gemini_service.dart';
+import '../services/local_storage_service.dart';
 import '../models/workspace_info.dart';
 
 class AiAgentScreen extends StatefulWidget {
@@ -24,6 +26,7 @@ class AiAgentScreen extends StatefulWidget {
 class _AiAgentScreenState extends State<AiAgentScreen> {
   final _gemini = GeminiService();
   final _driveService = DriveService();
+  final _localService = LocalStorageService();
   final _inputController = TextEditingController();
   final _scrollController = ScrollController();
 
@@ -235,13 +238,24 @@ class _AiAgentScreenState extends State<AiAgentScreen> {
 
     setState(() => _sending = true);
     try {
-      final fileId = await _driveService.createProject(
-        project,
-        widget.workspace.androidFolderId,
-      );
+      bool success;
+      if (Platform.isWindows) {
+        final path = widget.workspace.localPath;
+        if (path == null) {
+          setState(() => _sending = false);
+          return;
+        }
+        success = await _localService.createProject(project, path);
+      } else {
+        final fileId = await _driveService.createProject(
+          project,
+          widget.workspace.androidFolderId,
+        );
+        success = fileId != null;
+      }
       if (!mounted) return;
       setState(() => _sending = false);
-      if (fileId != null) {
+      if (success) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('${l.aiAgentProjectCreated}: ${project.name}')),
         );

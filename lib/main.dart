@@ -1,3 +1,4 @@
+import 'dart:io' show Platform;
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'l10n/app_localizations.dart';
@@ -51,7 +52,7 @@ class _ManidocAppState extends State<ManidocApp> {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Manidoc',
+      title: 'Manidoc Light',
       debugShowCheckedModeBanner: false,
       locale: _locale,
       localizationsDelegates: const [
@@ -75,7 +76,9 @@ class _ManidocAppState extends State<ManidocApp> {
         ),
       ),
       themeMode: ThemeMode.system,
-      home: const AuthGate(),
+      home: Platform.isWindows
+          ? const WorkspaceSelectScreen()
+          : const AuthGate(),
     );
   }
 }

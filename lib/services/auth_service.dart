@@ -22,11 +22,17 @@ class AuthService {
     }
   }
 
+  static String? lastError;
+
   Future<bool> signIn() async {
     try {
+      lastError = null;
       final account = await _googleSignIn.signIn();
       return account != null;
-    } catch (_) {
+    } catch (e, st) {
+      lastError = '$e';
+      // ignore: avoid_print
+      print('SignIn error: $e\n$st');
       return false;
     }
   }

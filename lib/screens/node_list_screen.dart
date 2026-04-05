@@ -1,7 +1,9 @@
+import 'dart:io' show Platform;
 import 'package:flutter/material.dart';
 import '../models/manidoc_node.dart';
 import '../models/manidoc_project.dart';
 import '../services/drive_service.dart';
+import '../services/local_storage_service.dart';
 import '../widgets/node_tile.dart';
 import 'node_editor_screen.dart';
 
@@ -16,12 +18,19 @@ class NodeListScreen extends StatefulWidget {
 
 class _NodeListScreenState extends State<NodeListScreen> {
   final _driveService = DriveService();
+  final _localService = LocalStorageService();
   bool _saving = false;
+
+  bool get _isWindows => Platform.isWindows;
 
   Future<void> _save() async {
     if (widget.project.isReadOnly) return;
     setState(() => _saving = true);
-    await _driveService.updateProject(widget.project);
+    if (_isWindows) {
+      await _localService.updateProject(widget.project);
+    } else {
+      await _driveService.updateProject(widget.project);
+    }
     setState(() => _saving = false);
   }
 

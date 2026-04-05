@@ -1,22 +1,28 @@
 import 'dart:convert';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
+import 'security_helper.dart';
 
 class GeminiService {
   static const _apiKeyPref = 'gemini_api_key';
   static const _modelPref = 'gemini_model';
   static const _defaultModel = 'gemini-2.5-flash-preview-04-17';
-  static const _storage = FlutterSecureStorage(
-    aOptions: AndroidOptions(encryptedSharedPreferences: true),
-  );
 
   Future<String?> getApiKey() async {
-    return _storage.read(key: _apiKeyPref);
+    final prefs = await SharedPreferences.getInstance();
+    final encrypted = prefs.getString(_apiKeyPref);
+    if (encrypted == null || encrypted.isEmpty) return null;
+    final decrypted = SecurityHelper.decrypt(encrypted);
+    return decrypted.isNotEmpty ? decrypted : null;
   }
 
   Future<void> setApiKey(String key) async {
-    await _storage.write(key: _apiKeyPref, value: key);
+    final prefs = await SharedPreferences.getInstance();
+    if (key.isEmpty) {
+      await prefs.remove(_apiKeyPref);
+      return;
+    }
+    await prefs.setString(_apiKeyPref, SecurityHelper.encrypt(key));
   }
 
   Future<String> getModel() async {

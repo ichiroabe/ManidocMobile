@@ -104,5 +104,14 @@
   "aiAgentMdMode": "Markdown出力",
   "aiAgentClear": "チャットをクリア",
   "aiAgentCreateProject": "このMarkdownからプロジェクトを作成",
-  "aiAgentProjectCreated": "プロジェクトを作成しました"
+  "aiAgentProjectCreated": "プロジェクトを作成しました",
+
+  "settingsSectionAi": "画像生成 / アシスタント設定",
+  "settingsLanguageLabel": "言語 (Language):",
+  "settingsProviderLabel": "AIプロバイダ:",
+  "settingsApiKeyLabel": "API キー:",
+  "settingsModelLabel": "モデル名:",
+  "settingsModelListLink": "利用可能なモデル名を確認する",
+  "settingsEndpointLabel": "エンドポイント:",
+  "settingsApiKeyHint": "APIキーは Google AI Studio から取得してください。"
 }

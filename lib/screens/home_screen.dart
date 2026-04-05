@@ -1,7 +1,9 @@
+import 'dart:io' show Platform;
 import 'package:flutter/material.dart';
 import '../models/manidoc_project.dart';
 import '../models/workspace_info.dart';
 import '../services/drive_service.dart';
+import '../services/local_storage_service.dart';
 import 'ai_agent_screen.dart';
 import 'node_list_screen.dart';
 import 'settings_screen.dart';
@@ -19,19 +21,30 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen>
     with SingleTickerProviderStateMixin {
   final _driveService = DriveService();
+  final _localService = LocalStorageService();
   late final TabController _tabController;
+
+  bool get _isWindows => Platform.isWindows;
 
   List<ManidocProject> _windowsProjects = [];
   List<ManidocProject> _androidProjects = [];
+  // Windows Flutter版: ローカルプロジェクト一覧
+  List<ManidocProject> _localProjects = [];
   bool _loadingWindows = true;
   bool _loadingAndroid = true;
+  bool _loadingLocal = true;
 
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 3, vsync: this);
-    _loadWindows();
-    _loadAndroid();
+    if (_isWindows) {
+      _tabController = TabController(length: 2, vsync: this);
+      _loadLocal();
+    } else {
+      _tabController = TabController(length: 3, vsync: this);
+      _loadWindows();
+      _loadAndroid();
+    }
   }
 
   @override
@@ -40,6 +53,28 @@ class _HomeScreenState extends State<HomeScreen>
     super.dispose();
   }
 
+  // ── ローカル（Windows Flutter版） ──
+  Future<void> _loadLocal() async {
+    setState(() => _loadingLocal = true);
+    final path = widget.workspace.localPath;
+    if (path == null) {
+      setState(() => _loadingLocal = false);
+      return;
+    }
+    final files = await _localService.listProjectFiles(path);
+    final projects = <ManidocProject>[];
+    for (final info in files) {
+      final project = await _localService.readProject(info.filePath);
+      if (project != null) projects.add(project);
+    }
+    if (!mounted) return;
+    setState(() {
+      _localProjects = projects;
+      _loadingLocal = false;
+    });
+  }
+
+  // ── Drive（Android版） ──
   Future<void> _loadWindows() async {
     setState(() => _loadingWindows = true);
     final files = await _driveService
@@ -112,16 +147,24 @@ class _HomeScreenState extends State<HomeScreen>
     if (name == null || name.isEmpty) return;
 
     final project = ManidocProject.create(name);
-    project.driveFolderId = widget.workspace.androidFolderId;
 
-    final fileId = await _driveService.createProject(
-      project,
-      widget.workspace.androidFolderId,
-    );
-    if (!mounted) return;
-    if (fileId != null) {
-      project.driveFileId = fileId;
-      _loadAndroid();
+    if (_isWindows) {
+      final path = widget.workspace.localPath;
+      if (path == null) return;
+      final ok = await _localService.createProject(project, path);
+      if (!mounted) return;
+      if (ok) _loadLocal();
+    } else {
+      project.driveFolderId = widget.workspace.androidFolderId;
+      final fileId = await _driveService.createProject(
+        project,
+        widget.workspace.androidFolderId,
+      );
+      if (!mounted) return;
+      if (fileId != null) {
+        project.driveFileId = fileId;
+        _loadAndroid();
+      }
     }
   }
 
@@ -132,7 +175,11 @@ class _HomeScreenState extends State<HomeScreen>
         builder: (_) => NodeListScreen(project: project),
       ),
     ).then((_) {
-      if (!project.isReadOnly) _loadAndroid();
+      if (_isWindows) {
+        _loadLocal();
+      } else if (!project.isReadOnly) {
+        _loadAndroid();
+      }
     });
   }
 
@@ -164,9 +211,16 @@ class _HomeScreenState extends State<HomeScreen>
     WidgetsBinding.instance.addPostFrameCallback((_) => controller.dispose());
     if (!mounted || name == null || name.isEmpty || name == project.name) return;
     project.name = name;
-    await _driveService.updateProject(project);
-    if (!mounted) return;
-    _loadAndroid();
+
+    if (_isWindows) {
+      await _localService.updateProject(project);
+      if (!mounted) return;
+      _loadLocal();
+    } else {
+      await _driveService.updateProject(project);
+      if (!mounted) return;
+      _loadAndroid();
+    }
   }
 
   Future<void> _deleteProject(ManidocProject project) async {
@@ -174,7 +228,9 @@ class _HomeScreenState extends State<HomeScreen>
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('削除確認'),
-        content: Text('「${project.name}」を削除しますか？\n（Google Drive上のファイルも削除されます）'),
+        content: Text(_isWindows
+            ? '「${project.name}」を削除しますか？\n（ローカルファイルも削除されます）'
+            : '「${project.name}」を削除しますか？\n（Google Drive上のファイルも削除されます）'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
@@ -188,11 +244,18 @@ class _HomeScreenState extends State<HomeScreen>
       ),
     );
     if (!mounted || confirmed != true) return;
-    if (project.driveFileId != null) {
-      await _driveService.deleteFile(project.driveFileId!);
+
+    if (_isWindows) {
+      await _localService.deleteProject(project);
+      if (!mounted) return;
+      _loadLocal();
+    } else {
+      if (project.driveFileId != null) {
+        await _driveService.deleteFile(project.driveFileId!);
+      }
+      if (!mounted) return;
+      _loadAndroid();
     }
-    if (!mounted) return;
-    _loadAndroid();
   }
 
   Widget _buildProjectList(
@@ -224,7 +287,9 @@ class _HomeScreenState extends State<HomeScreen>
       );
     }
     return RefreshIndicator(
-      onRefresh: readOnly ? _loadWindows : _loadAndroid,
+      onRefresh: _isWindows
+          ? _loadLocal
+          : (readOnly ? _loadWindows : _loadAndroid),
       child: ListView.builder(
         itemCount: projects.length,
         itemBuilder: (context, i) {
@@ -295,32 +360,50 @@ class _HomeScreenState extends State<HomeScreen>
         ],
         bottom: TabBar(
           controller: _tabController,
-          tabs: const [
-            Tab(icon: Icon(Icons.computer), text: 'Windows'),
-            Tab(icon: Icon(Icons.phone_android), text: 'Android'),
-            Tab(icon: Icon(Icons.smart_toy_outlined), text: 'AI'),
-          ],
+          tabs: _isWindows
+              ? const [
+                  Tab(icon: Icon(Icons.folder_outlined), text: 'プロジェクト'),
+                  Tab(icon: Icon(Icons.smart_toy_outlined), text: 'AI'),
+                ]
+              : const [
+                  Tab(icon: Icon(Icons.computer), text: 'Windows'),
+                  Tab(icon: Icon(Icons.phone_android), text: 'Android'),
+                  Tab(icon: Icon(Icons.smart_toy_outlined), text: 'AI'),
+                ],
         ),
       ),
       body: TabBarView(
         controller: _tabController,
-        children: [
-          _buildProjectList(_windowsProjects, _loadingWindows, true),
-          _buildProjectList(_androidProjects, _loadingAndroid, false),
-          AiAgentScreen(
-            workspace: widget.workspace,
-            onProjectCreated: () {
-              _loadAndroid();
-              _tabController.animateTo(1); // switch to Android tab
-            },
-          ),
-        ],
+        children: _isWindows
+            ? [
+                _buildProjectList(_localProjects, _loadingLocal, false),
+                AiAgentScreen(
+                  workspace: widget.workspace,
+                  onProjectCreated: () {
+                    _loadLocal();
+                    _tabController.animateTo(0);
+                  },
+                ),
+              ]
+            : [
+                _buildProjectList(_windowsProjects, _loadingWindows, true),
+                _buildProjectList(_androidProjects, _loadingAndroid, false),
+                AiAgentScreen(
+                  workspace: widget.workspace,
+                  onProjectCreated: () {
+                    _loadAndroid();
+                    _tabController.animateTo(1);
+                  },
+                ),
+              ],
       ),
       floatingActionButton: ListenableBuilder(
         listenable: _tabController,
         builder: (context, _) {
-          if (_tabController.index != 1) return const SizedBox.shrink();
-          // AI tab manages its own navigation
+          final showFab = _isWindows
+              ? _tabController.index == 0
+              : _tabController.index == 1;
+          if (!showFab) return const SizedBox.shrink();
           return FloatingActionButton.extended(
             onPressed: _createProject,
             icon: const Icon(Icons.add),

@@ -45,11 +45,18 @@ dependencies:
   # WebViewエディタ
   webview_flutter: ^4.10.0
 
-  # セキュア保存
-  flutter_secure_storage: ^9.2.4
+  # Markdownプレビュー
+  flutter_markdown: ^0.7.4
+
 
   # カメラ・画像選択
   image_picker: ^1.1.2
+
+  # ファイルピッカー（Windows用）
+  file_picker: ^8.0.0
+
+  # 暗号化
+  encrypt: ^5.0.3
 
   # データ・ユーティリティ
   shared_preferences: ^2.3.3
@@ -67,6 +74,15 @@ dev_dependencies:
   # package. See that file for information about deactivating specific lint
   # rules and activating additional ones.
   flutter_lints: ^6.0.0
+  flutter_launcher_icons: ^0.14.1
+
+flutter_launcher_icons:
+  android: "launcher_icon"
+  ios: false
+  image_path: "assets/icon/manidoc_icon_1024.png"
+  min_sdk_android: 21
+  adaptive_icon_background: "#FFFFFF"
+  adaptive_icon_foreground: "assets/icon/manidoc_icon_1024.png"
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec

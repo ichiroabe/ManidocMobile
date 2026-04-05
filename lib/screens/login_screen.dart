@@ -23,8 +23,12 @@ class _LoginScreenState extends State<LoginScreen> {
         MaterialPageRoute(builder: (_) => const WorkspaceSelectScreen()),
       );
     } else {
+      final err = AuthService.lastError;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('サインインに失敗しました')),
+        SnackBar(
+          content: Text('サインインに失敗: ${err ?? "不明"}'),
+          duration: const Duration(seconds: 10),
+        ),
       );
       setState(() => _loading = false);
     }

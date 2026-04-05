@@ -19,6 +19,9 @@ class ManidocProject {
   bool isReadOnly;
   bool hasProjectFolder;   // true=新形式(driveFolderIdがプロジェクトフォルダ) / false=旧形式
 
+  // ローカルメタデータ（Windows用・JSONに保存しない）
+  String? localFilePath;
+
   ManidocProject({
     required this.id,
     required this.name,

@@ -1,24 +1,28 @@
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:webview_flutter/webview_flutter.dart';
 import '../models/manidoc_node.dart';
 import '../models/manidoc_project.dart';
 import '../services/drive_service.dart';
 import '../services/gemini_service.dart';
+import '../services/local_storage_service.dart';
 
 class NodeEditorScreen extends StatefulWidget {
   final ManidocProject project;
   final ManidocNode node;
   final Future<void> Function() onSave;
+  final bool startInPreview;
 
   const NodeEditorScreen({
     super.key,
     required this.project,
     required this.node,
     required this.onSave,
+    this.startInPreview = false,
   });
 
   @override
@@ -26,20 +30,23 @@ class NodeEditorScreen extends StatefulWidget {
 }
 
 class _NodeEditorScreenState extends State<NodeEditorScreen> {
-  late WebViewController _webController;
   late TextEditingController _titleController;
+  late TextEditingController _articleController;
+
   bool _saving = false;
   bool _dirty = false;
   bool _editorReady = false;
+  late bool _previewMode = widget.startInPreview;
 
-  // 画像（Drive上のURL or ローカルファイルパス）
   String? _imageUrl;
-  Uint8List? _imageBytes; // ローカル表示用バイト列（Drive URLは認証不可のため）
+  Uint8List? _imageBytes;
   bool _imageUploading = false;
 
   final _driveService = DriveService();
+  final _localService = LocalStorageService();
   final _gemini = GeminiService();
-  final _picker = ImagePicker();
+
+  bool get _isWindows => Platform.isWindows;
 
   @override
   void initState() {
@@ -47,57 +54,125 @@ class _NodeEditorScreenState extends State<NodeEditorScreen> {
     _titleController = TextEditingController(text: widget.node.title);
     _imageUrl = widget.node.imagePath.isNotEmpty ? widget.node.imagePath : null;
 
-    // Drive画像は起動時にバイトをダウンロード
-    if (_imageUrl != null && _imageUrl!.startsWith('drive:')) {
-      final fileId = _imageUrl!.substring(6);
-      _driveService.downloadFileBytes(fileId).then((bytes) {
-        if (bytes != null && mounted) {
-          setState(() => _imageBytes = Uint8List.fromList(bytes));
-        }
-      });
+    // Drive画像は起動時にバイトをダウンロード（Android版のみ）
+    if (!_isWindows && _imageUrl != null) {
+      _resolveAndLoadImage(_imageUrl!);
     }
+
+    _articleController = TextEditingController(text: widget.node.article);
+    _editorReady = true;
 
     if (!widget.project.isReadOnly) {
       _titleController.addListener(() {
         if (!_dirty) setState(() => _dirty = true);
       });
+      _articleController.addListener(() {
+        if (!_dirty) setState(() => _dirty = true);
+      });
     }
-
-    _webController = WebViewController()
-      ..setJavaScriptMode(JavaScriptMode.unrestricted)
-      ..addJavaScriptChannel(
-        'ContentChanged',
-        onMessageReceived: (_) {
-          if (!_dirty) setState(() => _dirty = true);
-        },
-      )
-      ..setNavigationDelegate(NavigationDelegate(
-        onPageFinished: (_) async {
-          _editorReady = true;
-          final escaped = jsonEncode(widget.node.article);
-          final isReadOnly = widget.project.isReadOnly ? 'true' : 'false';
-          await _webController
-              .runJavaScript('initEditor($escaped, $isReadOnly)');
-        },
-      ))
-      ..loadFlutterAsset('assets/editor.html');
   }
 
   @override
   void dispose() {
     _titleController.dispose();
+    _articleController.dispose();
     super.dispose();
   }
 
-  Future<String> _getMarkdown() async {
-    final result = await _webController
-        .runJavaScriptReturningResult('getMarkdown()');
-    final raw = result.toString();
+  Future<void> _resolveAndLoadImage(String url) async {
     try {
-      return jsonDecode(raw) as String;
-    } catch (_) {
-      return raw.replaceAll(RegExp(r'^"|"$'), '');
+      if (url.startsWith('drive:')) {
+        // 旧形式: 後方互換
+        final fileId = url.substring(6);
+        final bytes = await _driveService.downloadFileBytes(fileId);
+        if (bytes != null && mounted) {
+          setState(() => _imageBytes = Uint8List.fromList(bytes));
+        }
+        return;
+      }
+      if (url.startsWith('images/')) {
+        // 新形式: プロジェクトフォルダからの相対パス
+        final folderId = widget.project.driveFolderId;
+        if (folderId == null) return;
+        String projectFolderId = folderId;
+        if (!widget.project.hasProjectFolder) {
+          final sub = await _driveService.getOrCreateSubFolder(
+              widget.project.id, parentId: folderId);
+          if (sub != null) projectFolderId = sub;
+        }
+        final imagesFolderId = await _driveService.getOrCreateSubFolder(
+            'images', parentId: projectFolderId);
+        if (imagesFolderId == null) return;
+        final fileName = url.substring('images/'.length);
+        final fileId = await _driveService.findFileIdByName(
+            imagesFolderId, fileName);
+        if (fileId == null) return;
+        final bytes = await _driveService.downloadFileBytes(fileId);
+        if (bytes != null && mounted) {
+          setState(() => _imageBytes = Uint8List.fromList(bytes));
+        }
+      }
+    } catch (_) {}
+  }
+
+  // ─────────────────────────────────────────
+  // ページめくりナビゲーション（深さ優先）
+  // ─────────────────────────────────────────
+  List<ManidocNode> _flattenDepthFirst() {
+    final result = <ManidocNode>[];
+    void walk(ManidocNode n) {
+      result.add(n);
+      for (final c in n.children) {
+        walk(c);
+      }
     }
+    for (final r in widget.project.rootNodes) {
+      walk(r);
+    }
+    return result;
+  }
+
+  Future<void> _navigateSibling(bool forward) async {
+    final flat = _flattenDepthFirst();
+    final idx = flat.indexWhere((n) => n.id == widget.node.id);
+    if (idx < 0) return;
+    final nextIdx = forward ? idx + 1 : idx - 1;
+    if (nextIdx < 0 || nextIdx >= flat.length) return;
+
+    if (_dirty && !widget.project.isReadOnly) {
+      await _save();
+    }
+
+    if (!mounted) return;
+    Navigator.of(context).pushReplacement(
+      PageRouteBuilder(
+        transitionDuration: const Duration(milliseconds: 250),
+        pageBuilder: (_, __, ___) => NodeEditorScreen(
+          project: widget.project,
+          node: flat[nextIdx],
+          onSave: widget.onSave,
+          startInPreview: true,
+        ),
+        transitionsBuilder: (_, animation, __, child) {
+          final begin = Offset(forward ? 1.0 : -1.0, 0.0);
+          return SlideTransition(
+            position: Tween(begin: begin, end: Offset.zero)
+                .chain(CurveTween(curve: Curves.easeOut))
+                .animate(animation),
+            child: child,
+          );
+        },
+      ),
+    );
+  }
+
+  Future<String> _getMarkdown() async {
+    return _articleController.text;
+  }
+
+  Future<void> _setMarkdown(String markdown) async {
+    _articleController.text = markdown;
+    if (!_dirty) setState(() => _dirty = true);
   }
 
   Future<void> _save() async {
@@ -128,9 +203,7 @@ class _NodeEditorScreenState extends State<NodeEditorScreen> {
         onInsert: (result) async {
           final current = await _getMarkdown();
           final newContent = current.isEmpty ? result : '$current\n\n$result';
-          final escaped = jsonEncode(newContent);
-          await _webController.runJavaScript('setMarkdown($escaped)');
-          if (!_dirty) setState(() => _dirty = true);
+          await _setMarkdown(newContent);
         },
       ),
     );
@@ -156,6 +229,137 @@ class _NodeEditorScreenState extends State<NodeEditorScreen> {
     );
   }
 
+  void _wrapSelection(String left, String right) {
+    final sel = _articleController.selection;
+    final text = _articleController.text;
+    if (!sel.isValid) {
+      final insert = '$left$right';
+      _articleController.text = text + insert;
+      _articleController.selection = TextSelection.collapsed(
+        offset: text.length + left.length,
+      );
+      return;
+    }
+    final start = sel.start;
+    final end = sel.end;
+    final selected = text.substring(start, end);
+    final newText = text.replaceRange(start, end, '$left$selected$right');
+    _articleController.text = newText;
+    _articleController.selection = TextSelection(
+      baseOffset: start + left.length,
+      extentOffset: start + left.length + selected.length,
+    );
+  }
+
+  void _insertLinePrefix(String prefix) {
+    final sel = _articleController.selection;
+    final text = _articleController.text;
+    final pos = sel.isValid ? sel.start : text.length;
+    int lineStart = text.lastIndexOf('\n', pos - 1) + 1;
+    final newText = text.replaceRange(lineStart, lineStart, prefix);
+    _articleController.text = newText;
+    _articleController.selection = TextSelection.collapsed(
+      offset: pos + prefix.length,
+    );
+  }
+
+  void _insertAtCursor(String snippet, {int? cursorOffset}) {
+    final sel = _articleController.selection;
+    final text = _articleController.text;
+    final pos = sel.isValid ? sel.start : text.length;
+    final newText = text.replaceRange(pos, sel.isValid ? sel.end : pos, snippet);
+    _articleController.text = newText;
+    _articleController.selection = TextSelection.collapsed(
+      offset: pos + (cursorOffset ?? snippet.length),
+    );
+  }
+
+  Widget _buildToolbar() {
+    final items = <Widget>[
+      _tbBtn('H1', 'H1', () => _insertLinePrefix('# ')),
+      _tbBtn('H2', 'H2', () => _insertLinePrefix('## ')),
+      _tbBtn('H3', 'H3', () => _insertLinePrefix('### ')),
+      _tbIcon(Icons.format_bold, '太字', () => _wrapSelection('**', '**')),
+      _tbIcon(Icons.format_italic, '斜体', () => _wrapSelection('*', '*')),
+      _tbIcon(Icons.format_strikethrough, '取消線', () => _wrapSelection('~~', '~~')),
+      _tbIcon(Icons.format_list_bulleted, '箇条書き', () => _insertLinePrefix('- ')),
+      _tbIcon(Icons.format_list_numbered, '番号付き', () => _insertLinePrefix('1. ')),
+      _tbIcon(Icons.check_box_outlined, 'チェック', () => _insertLinePrefix('- [ ] ')),
+      _tbIcon(Icons.format_quote, '引用', () => _insertLinePrefix('> ')),
+      _tbIcon(Icons.code, 'コード', () => _wrapSelection('`', '`')),
+      _tbIcon(Icons.data_object, 'コードブロック',
+          () => _insertAtCursor('\n```\n\n```\n', cursorOffset: 5)),
+      _tbIcon(Icons.link, 'リンク',
+          () => _insertAtCursor('[](url)', cursorOffset: 1)),
+      _tbIcon(Icons.horizontal_rule, '区切り線',
+          () => _insertAtCursor('\n---\n')),
+    ];
+    return SizedBox(
+      height: 44,
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 4),
+        children: items,
+      ),
+    );
+  }
+
+  Widget _tbBtn(String label, String tip, VoidCallback onTap) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 4),
+      child: Tooltip(
+        message: tip,
+        child: OutlinedButton(
+          style: OutlinedButton.styleFrom(
+            padding: const EdgeInsets.symmetric(horizontal: 10),
+            minimumSize: const Size(0, 36),
+          ),
+          onPressed: onTap,
+          child: Text(label, style: const TextStyle(fontWeight: FontWeight.bold)),
+        ),
+      ),
+    );
+  }
+
+  Widget _tbIcon(IconData icon, String tip, VoidCallback onTap) {
+    return IconButton(
+      icon: Icon(icon, size: 20),
+      tooltip: tip,
+      onPressed: onTap,
+      visualDensity: VisualDensity.compact,
+    );
+  }
+
+  Widget _buildEditor() {
+    if (_previewMode) {
+      return Markdown(
+        data: _articleController.text,
+        padding: const EdgeInsets.all(16),
+        selectable: true,
+      );
+    }
+    return Column(
+      children: [
+        if (!widget.project.isReadOnly) _buildToolbar(),
+        if (!widget.project.isReadOnly) const Divider(height: 1),
+        Expanded(
+          child: TextField(
+            controller: _articleController,
+            maxLines: null,
+            expands: true,
+            readOnly: widget.project.isReadOnly,
+            style: const TextStyle(fontFamily: 'Consolas', fontSize: 14),
+            decoration: const InputDecoration(
+              border: InputBorder.none,
+              contentPadding: EdgeInsets.all(16),
+              hintText: 'Markdownで記述...',
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final readOnly = widget.project.isReadOnly;
@@ -178,6 +382,11 @@ class _NodeEditorScreenState extends State<NodeEditorScreen> {
               padding: EdgeInsets.symmetric(horizontal: 8),
               child: Icon(Icons.lock_outline, size: 18),
             ),
+          IconButton(
+            icon: Icon(_previewMode ? Icons.edit_outlined : Icons.visibility_outlined),
+            tooltip: _previewMode ? '編集' : 'プレビュー',
+            onPressed: () => setState(() => _previewMode = !_previewMode),
+          ),
           if (!readOnly)
             IconButton(
               icon: Icon(
@@ -215,13 +424,20 @@ class _NodeEditorScreenState extends State<NodeEditorScreen> {
             ),
         ],
       ),
-      body: Column(
-        children: [
-          Expanded(child: WebViewWidget(controller: _webController)),
-          // 画像プレビュー（設定されている場合）
-          if (_imageUrl != null && _imageUrl!.isNotEmpty)
-            _buildImagePreview(),
-        ],
+      body: GestureDetector(
+        behavior: HitTestBehavior.translucent,
+        onHorizontalDragEnd: (details) {
+          final v = details.primaryVelocity ?? 0;
+          if (v.abs() < 300) return;
+          _navigateSibling(v < 0); // 左スワイプ=次, 右スワイプ=前
+        },
+        child: Column(
+          children: [
+            Expanded(child: _buildEditor()),
+            if (_imageUrl != null && _imageUrl!.isNotEmpty)
+              _buildImagePreview(),
+          ],
+        ),
       ),
     );
   }
@@ -231,8 +447,7 @@ class _NodeEditorScreenState extends State<NodeEditorScreen> {
     final Widget imageWidget;
     if (_imageBytes != null) {
       imageWidget = Image.memory(_imageBytes!, fit: BoxFit.contain);
-    } else if (url.startsWith('drive:')) {
-      // Driveからダウンロード中
+    } else if (url.startsWith('drive:') || url.startsWith('images/')) {
       imageWidget = const Center(child: CircularProgressIndicator());
     } else if (url.startsWith('data:')) {
       imageWidget = Image.memory(base64Decode(url.split(',').last), fit: BoxFit.contain);
@@ -296,10 +511,12 @@ class _ImageBottomSheet extends StatefulWidget {
 class _ImageBottomSheetState extends State<_ImageBottomSheet> {
   final _gemini = GeminiService();
   final _driveService = DriveService();
-  final _picker = ImagePicker();
+  final _localService = LocalStorageService();
   final _aiPromptController = TextEditingController();
   bool _loading = false;
   String? _errorMsg;
+
+  bool get _isWindows => Platform.isWindows;
 
   @override
   void dispose() {
@@ -307,20 +524,63 @@ class _ImageBottomSheetState extends State<_ImageBottomSheet> {
     super.dispose();
   }
 
-  Future<void> _pickImage(ImageSource source) async {
+  Future<void> _pickFromSource(ImageSource source) async {
     try {
-      final picked = await _picker.pickImage(
-        source: source,
-        maxWidth: 1920,
-        imageQuality: 85,
-      );
-      if (picked == null) return;
-      await _uploadAndSet(File(picked.path));
+      final picker = ImagePicker();
+      final xfile = await picker.pickImage(source: source, imageQuality: 90);
+      if (xfile == null) return;
+      await _uploadAndSet(File(xfile.path));
     } catch (e) {
       if (mounted) setState(() => _errorMsg = e.toString());
     }
   }
 
+  Future<void> _pickImageWindows() async {
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.image,
+        allowMultiple: false,
+      );
+      if (result == null || result.files.isEmpty) return;
+      final path = result.files.single.path;
+      if (path == null) return;
+      await _saveAndSetImage(File(path));
+    } catch (e) {
+      if (mounted) setState(() => _errorMsg = e.toString());
+    }
+  }
+
+  /// Windows: ローカルフォルダに画像を保存
+  Future<void> _saveAndSetImage(File file) async {
+    setState(() { _loading = true; _errorMsg = null; });
+    try {
+      final bytes = await file.readAsBytes();
+
+      final localPath = widget.project.localFilePath;
+      if (localPath != null) {
+        final baseName = File(localPath).uri.pathSegments.last.replaceAll('.json', '');
+        final projDir = '${File(localPath).parent.path}/$baseName';
+        final fileName = 'img_${DateTime.now().millisecondsSinceEpoch}.png';
+        final savedPath = await _localService.saveImage(file, fileName, projDir);
+        if (savedPath != null && mounted) {
+          widget.onImageSet(savedPath, bytes);
+          Navigator.pop(context);
+          return;
+        }
+      }
+
+      if (mounted) {
+        widget.onImageSet(file.path, bytes);
+        Navigator.pop(context);
+      }
+    } catch (e) {
+      if (mounted) setState(() => _errorMsg = e.toString());
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  /// Android: Driveにアップロード
   Future<void> _uploadAndSet(File file) async {
     setState(() { _loading = true; _errorMsg = null; });
 
@@ -330,7 +590,6 @@ class _ImageBottomSheetState extends State<_ImageBottomSheet> {
       String? imageUrl;
 
       if (folderId != null) {
-        // 旧形式（hasProjectFolder=false）はプロジェクトIDのサブフォルダを先に作成
         String projectFolderId = folderId;
         if (!widget.project.hasProjectFolder) {
           projectFolderId = await _driveService.getOrCreateSubFolder(
@@ -344,13 +603,16 @@ class _ImageBottomSheetState extends State<_ImageBottomSheet> {
           final fileId = await _driveService.uploadImage(
             file, fileName, imagesFolderId);
           if (fileId != null) {
-            // Drive URLは認証なしで表示不可のためfileIdのみ保存
-            imageUrl = 'drive:$fileId';
+            // PC版互換: 相対パスで保存
+            imageUrl = 'images/$fileName';
           }
         }
       }
 
-      imageUrl ??= file.path;
+      if (imageUrl == null) {
+        setState(() => _errorMsg = 'Drive にアップロードできませんでした');
+        return;
+      }
 
       if (mounted) {
         widget.onImageSet(imageUrl, bytes);
@@ -377,7 +639,12 @@ class _ImageBottomSheetState extends State<_ImageBottomSheet> {
       final tmpFile = File(
           '${tmpDir.path}/ai_img_${DateTime.now().millisecondsSinceEpoch}.png');
       await tmpFile.writeAsBytes(bytes);
-      await _uploadAndSet(tmpFile);
+
+      if (_isWindows) {
+        await _saveAndSetImage(tmpFile);
+      } else {
+        await _uploadAndSet(tmpFile);
+      }
     } catch (e) {
       if (mounted) {
         setState(() {
@@ -425,35 +692,36 @@ class _ImageBottomSheetState extends State<_ImageBottomSheet> {
                     style: Theme.of(context).textTheme.titleMedium),
                 const SizedBox(height: 16),
 
-                // カメラ・ギャラリー
-                Row(
-                  children: [
-                    Expanded(
-                      child: OutlinedButton.icon(
-                        onPressed: _loading
-                            ? null
-                            : () => _pickImage(ImageSource.camera),
-                        icon: const Icon(Icons.camera_alt_outlined),
-                        label: const Text('カメラで撮影'),
+                if (_isWindows)
+                  OutlinedButton.icon(
+                    onPressed: _loading ? null : _pickImageWindows,
+                    icon: const Icon(Icons.photo_library_outlined),
+                    label: const Text('ファイルから選択'),
+                  )
+                else
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: _loading ? null : () => _pickFromSource(ImageSource.camera),
+                          icon: const Icon(Icons.camera_alt_outlined),
+                          label: const Text('カメラで撮影'),
+                        ),
                       ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: OutlinedButton.icon(
-                        onPressed: _loading
-                            ? null
-                            : () => _pickImage(ImageSource.gallery),
-                        icon: const Icon(Icons.photo_library_outlined),
-                        label: const Text('ギャラリーから'),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: _loading ? null : () => _pickFromSource(ImageSource.gallery),
+                          icon: const Icon(Icons.photo_library_outlined),
+                          label: const Text('ギャラリーから'),
+                        ),
                       ),
-                    ),
-                  ],
-                ),
+                    ],
+                  ),
                 const SizedBox(height: 16),
                 const Divider(),
                 const SizedBox(height: 8),
 
-                // AI画像生成
                 Text('AIで画像を生成',
                     style: Theme.of(context).textTheme.labelLarge),
                 const SizedBox(height: 4),
@@ -496,7 +764,6 @@ class _ImageBottomSheetState extends State<_ImageBottomSheet> {
                   ),
                 ],
 
-                // 現在の画像クリア
                 if (widget.currentImageUrl != null) ...[
                   const SizedBox(height: 16),
                   const Divider(),
@@ -520,7 +787,7 @@ class _ImageBottomSheetState extends State<_ImageBottomSheet> {
 }
 
 // ─────────────────────────────────────────────
-// AIアシスタント ボトムシート（既存）
+// AIアシスタント ボトムシート
 // ─────────────────────────────────────────────
 class _AiBottomSheet extends StatefulWidget {
   final String currentArticle;
