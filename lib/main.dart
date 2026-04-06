@@ -6,6 +6,7 @@ import 'screens/login_screen.dart';
 import 'screens/workspace_select_screen.dart';
 import 'services/auth_service.dart';
 import 'services/locale_service.dart';
+import 'services/workspace_service.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -93,6 +94,7 @@ class AuthGate extends StatefulWidget {
 class _AuthGateState extends State<AuthGate> {
   bool _checking = true;
   bool _signedIn = false;
+  bool _hasCache = false;
 
   @override
   void initState() {
@@ -103,10 +105,23 @@ class _AuthGateState extends State<AuthGate> {
   Future<void> _checkSignIn() async {
     final auth = AuthService();
     final signedIn = await auth.trySignInSilently();
-    setState(() {
-      _signedIn = signedIn;
-      _checking = false;
-    });
+
+    if (!signedIn) {
+      // サインイン失敗時: キャッシュ（ワークスペース登録）があるか確認
+      final workspaces = await WorkspaceService().getWorkspaces();
+      if (!mounted) return;
+      setState(() {
+        _signedIn = false;
+        _hasCache = workspaces.isNotEmpty;
+        _checking = false;
+      });
+    } else {
+      if (!mounted) return;
+      setState(() {
+        _signedIn = true;
+        _checking = false;
+      });
+    }
   }
 
   @override
@@ -116,6 +131,10 @@ class _AuthGateState extends State<AuthGate> {
         body: Center(child: CircularProgressIndicator()),
       );
     }
-    return _signedIn ? const WorkspaceSelectScreen() : const LoginScreen();
+    // サインイン成功 or キャッシュあり → ワークスペース選択へ
+    if (_signedIn || _hasCache) {
+      return const WorkspaceSelectScreen();
+    }
+    return const LoginScreen();
   }
 }

@@ -2,24 +2,27 @@ import 'dart:io' show Platform;
 import 'package:flutter/material.dart';
 import '../models/manidoc_node.dart';
 import '../models/manidoc_project.dart';
-import '../services/drive_service.dart';
+import '../models/workspace_info.dart';
 import '../services/local_storage_service.dart';
+import '../services/sync_service.dart';
 import '../widgets/node_tile.dart';
 import 'node_editor_screen.dart';
 
 class NodeListScreen extends StatefulWidget {
   final ManidocProject project;
+  final WorkspaceInfo? workspace; // Android用（オフライン同期に使用）
 
-  const NodeListScreen({super.key, required this.project});
+  const NodeListScreen({super.key, required this.project, this.workspace});
 
   @override
   State<NodeListScreen> createState() => _NodeListScreenState();
 }
 
 class _NodeListScreenState extends State<NodeListScreen> {
-  final _driveService = DriveService();
+  final _syncService = SyncService();
   final _localService = LocalStorageService();
   bool _saving = false;
+  String? _selectedNodeId;
 
   bool get _isWindows => Platform.isWindows;
 
@@ -28,23 +31,27 @@ class _NodeListScreenState extends State<NodeListScreen> {
     setState(() => _saving = true);
     if (_isWindows) {
       await _localService.updateProject(widget.project);
-    } else {
-      await _driveService.updateProject(widget.project);
+    } else if (widget.workspace != null) {
+      await _syncService.saveProject(
+          widget.workspace!, 'android', widget.project);
     }
     setState(() => _saving = false);
   }
 
-  void _openNode(ManidocNode node) {
-    Navigator.push(
+  void _openNode(ManidocNode node) async {
+    await Navigator.push(
       context,
       MaterialPageRoute(
         builder: (_) => NodeEditorScreen(
           project: widget.project,
           node: node,
           onSave: _save,
+          workspace: widget.workspace,
         ),
       ),
     );
+    if (!mounted) return;
+    setState(() => _selectedNodeId = widget.project.lastSelectedNodeId);
   }
 
   void _addRootNode() async {
@@ -59,6 +66,151 @@ class _NodeListScreenState extends State<NodeListScreen> {
     if (!mounted || node == null) return;
     setState(() => parent.children.add(node));
     await _save();
+  }
+
+  void _renameNode(ManidocNode node) async {
+    final controller = TextEditingController(text: node.title);
+    final newTitle = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('ノード名を変更'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          decoration: const InputDecoration(
+            labelText: 'タイトル',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('キャンセル'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, controller.text.trim()),
+            child: const Text('変更'),
+          ),
+        ],
+      ),
+    );
+    WidgetsBinding.instance.addPostFrameCallback((_) => controller.dispose());
+    if (newTitle == null || newTitle.isEmpty || newTitle == node.title) return;
+    setState(() => node.title = newTitle);
+    await _save();
+  }
+
+  void _moveNodeUp(ManidocNode node) async {
+    final siblings = _findSiblings(node);
+    if (siblings == null) return;
+    final index = siblings.indexWhere((n) => n.id == node.id);
+    if (index <= 0) return;
+    setState(() {
+      siblings.removeAt(index);
+      siblings.insert(index - 1, node);
+    });
+    await _save();
+  }
+
+  void _moveNodeDown(ManidocNode node) async {
+    final siblings = _findSiblings(node);
+    if (siblings == null) return;
+    final index = siblings.indexWhere((n) => n.id == node.id);
+    if (index < 0 || index >= siblings.length - 1) return;
+    setState(() {
+      siblings.removeAt(index);
+      siblings.insert(index + 1, node);
+    });
+    await _save();
+  }
+
+  void _moveToOtherParent(ManidocNode node) async {
+    // 移動先候補を収集（自分自身と自分の子孫は除外）
+    final candidates = <_MoveTarget>[];
+    // ルート（親なし）を候補に追加
+    candidates.add(_MoveTarget(name: '（ルート）', parent: null));
+    _collectMoveCandidates(widget.project.rootNodes, candidates, node, 0);
+
+    final selected = await showDialog<_MoveTarget>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('移動先を選択'),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: ListView.builder(
+            shrinkWrap: true,
+            itemCount: candidates.length,
+            itemBuilder: (_, i) {
+              final c = candidates[i];
+              return ListTile(
+                leading: Icon(c.parent == null
+                    ? Icons.home_outlined
+                    : Icons.folder_open),
+                title: Text(c.name),
+                contentPadding:
+                    EdgeInsets.only(left: (c.depth * 16.0) + 16),
+                onTap: () => Navigator.pop(ctx, c),
+              );
+            },
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('キャンセル'),
+          ),
+        ],
+      ),
+    );
+    if (selected == null) return;
+
+    setState(() {
+      // 元の場所から削除
+      _removeNodeFromTree(widget.project.rootNodes, node);
+      // 新しい場所に追加
+      if (selected.parent == null) {
+        widget.project.rootNodes.add(node);
+      } else {
+        selected.parent!.children.add(node);
+      }
+    });
+    await _save();
+  }
+
+  void _collectMoveCandidates(List<ManidocNode> nodes,
+      List<_MoveTarget> candidates, ManidocNode exclude, int depth) {
+    for (final n in nodes) {
+      if (n.id == exclude.id) continue;
+      if (_isDescendantOf(n, exclude)) continue;
+      candidates.add(_MoveTarget(name: n.title, parent: n, depth: depth));
+      _collectMoveCandidates(n.children, candidates, exclude, depth + 1);
+    }
+  }
+
+  bool _isDescendantOf(ManidocNode node, ManidocNode ancestor) {
+    for (final child in ancestor.children) {
+      if (child.id == node.id) return true;
+      if (_isDescendantOf(node, child)) return true;
+    }
+    return false;
+  }
+
+  List<ManidocNode>? _findSiblings(ManidocNode node) {
+    // ルートレベルを確認
+    if (widget.project.rootNodes.any((n) => n.id == node.id)) {
+      return widget.project.rootNodes;
+    }
+    return _findSiblingsIn(widget.project.rootNodes, node);
+  }
+
+  List<ManidocNode>? _findSiblingsIn(
+      List<ManidocNode> nodes, ManidocNode target) {
+    for (final n in nodes) {
+      if (n.children.any((c) => c.id == target.id)) return n.children;
+      final found = _findSiblingsIn(n.children, target);
+      if (found != null) return found;
+    }
+    return null;
   }
 
   void _deleteNode(ManidocNode node) async {
@@ -183,23 +335,31 @@ class _NodeListScreenState extends State<NodeListScreen> {
               ),
             )
           : ListView(
+              padding: const EdgeInsets.only(bottom: 80),
               children: project.rootNodes
                   .map((node) => NodeTile(
                         node: node,
                         depth: 0,
                         readOnly: project.isReadOnly,
+                        selectedNodeId: _selectedNodeId,
                         onTap: _openNode,
                         onAddChild: _addChildNode,
                         onDelete: _deleteNode,
+                        onRename: _renameNode,
+                        onMoveUp: _moveNodeUp,
+                        onMoveDown: _moveNodeDown,
+                        onMoveToParent: _moveToOtherParent,
                       ))
                   .toList(),
             ),
-      floatingActionButton: !project.isReadOnly
-          ? FloatingActionButton(
-              onPressed: _addRootNode,
-              child: const Icon(Icons.add),
-            )
-          : null,
     );
   }
+}
+
+class _MoveTarget {
+  final String name;
+  final ManidocNode? parent;
+  final int depth;
+
+  _MoveTarget({required this.name, this.parent, this.depth = 0});
 }

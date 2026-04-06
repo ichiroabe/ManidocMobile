@@ -7,15 +7,18 @@ import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:image_picker/image_picker.dart';
 import '../models/manidoc_node.dart';
 import '../models/manidoc_project.dart';
+import '../models/workspace_info.dart';
 import '../services/drive_service.dart';
 import '../services/gemini_service.dart';
 import '../services/local_storage_service.dart';
+import '../services/sync_service.dart';
 
 class NodeEditorScreen extends StatefulWidget {
   final ManidocProject project;
   final ManidocNode node;
   final Future<void> Function() onSave;
   final bool startInPreview;
+  final WorkspaceInfo? workspace;
 
   const NodeEditorScreen({
     super.key,
@@ -23,6 +26,7 @@ class NodeEditorScreen extends StatefulWidget {
     required this.node,
     required this.onSave,
     this.startInPreview = false,
+    this.workspace,
   });
 
   @override
@@ -32,6 +36,7 @@ class NodeEditorScreen extends StatefulWidget {
 class _NodeEditorScreenState extends State<NodeEditorScreen> {
   late TextEditingController _titleController;
   late TextEditingController _articleController;
+  late ManidocNode _currentNode;
 
   bool _saving = false;
   bool _dirty = false;
@@ -45,22 +50,31 @@ class _NodeEditorScreenState extends State<NodeEditorScreen> {
   final _driveService = DriveService();
   final _localService = LocalStorageService();
   final _gemini = GeminiService();
+  final _syncService = SyncService();
 
   bool get _isWindows => Platform.isWindows;
 
   @override
   void initState() {
     super.initState();
-    _titleController = TextEditingController(text: widget.node.title);
-    _imageUrl = widget.node.imagePath.isNotEmpty ? widget.node.imagePath : null;
+    _currentNode = widget.node;
+    _initForNode(_currentNode);
+  }
 
-    // Drive画像は起動時にバイトをダウンロード（Android版のみ）
+  void _initForNode(ManidocNode node) {
+    _titleController = TextEditingController(text: node.title);
+    _imageUrl = node.imagePath.isNotEmpty ? node.imagePath : null;
+    _imageBytes = null;
+
     if (!_isWindows && _imageUrl != null) {
       _resolveAndLoadImage(_imageUrl!);
     }
 
-    _articleController = TextEditingController(text: widget.node.article);
+    _articleController = TextEditingController(text: node.article);
     _editorReady = true;
+    _dirty = false;
+
+    widget.project.lastSelectedNodeId = node.id;
 
     if (!widget.project.isReadOnly) {
       _titleController.addListener(() {
@@ -91,7 +105,20 @@ class _NodeEditorScreenState extends State<NodeEditorScreen> {
         return;
       }
       if (url.startsWith('images/')) {
-        // 新形式: プロジェクトフォルダからの相対パス
+        final fileName = url.substring('images/'.length);
+
+        // キャッシュを優先で読み込み
+        if (widget.workspace != null) {
+          final type = widget.project.isReadOnly ? 'windows' : 'android';
+          final cached = await _syncService.loadCachedImage(
+            widget.workspace!, type, widget.project.id, fileName);
+          if (cached != null && mounted) {
+            setState(() => _imageBytes = cached);
+            return;
+          }
+        }
+
+        // キャッシュになければDriveからダウンロード
         final folderId = widget.project.driveFolderId;
         if (folderId == null) return;
         String projectFolderId = folderId;
@@ -103,13 +130,19 @@ class _NodeEditorScreenState extends State<NodeEditorScreen> {
         final imagesFolderId = await _driveService.getOrCreateSubFolder(
             'images', parentId: projectFolderId);
         if (imagesFolderId == null) return;
-        final fileName = url.substring('images/'.length);
         final fileId = await _driveService.findFileIdByName(
             imagesFolderId, fileName);
         if (fileId == null) return;
         final bytes = await _driveService.downloadFileBytes(fileId);
         if (bytes != null && mounted) {
-          setState(() => _imageBytes = Uint8List.fromList(bytes));
+          final uint8bytes = Uint8List.fromList(bytes);
+          setState(() => _imageBytes = uint8bytes);
+          // ダウンロードした画像をキャッシュに保存
+          if (widget.workspace != null) {
+            final type = widget.project.isReadOnly ? 'windows' : 'android';
+            await _syncService.cacheImage(
+              widget.workspace!, type, widget.project.id, fileName, uint8bytes);
+          }
         }
       }
     } catch (_) {}
@@ -134,7 +167,7 @@ class _NodeEditorScreenState extends State<NodeEditorScreen> {
 
   Future<void> _navigateSibling(bool forward) async {
     final flat = _flattenDepthFirst();
-    final idx = flat.indexWhere((n) => n.id == widget.node.id);
+    final idx = flat.indexWhere((n) => n.id == _currentNode.id);
     if (idx < 0) return;
     final nextIdx = forward ? idx + 1 : idx - 1;
     if (nextIdx < 0 || nextIdx >= flat.length) return;
@@ -144,26 +177,16 @@ class _NodeEditorScreenState extends State<NodeEditorScreen> {
     }
 
     if (!mounted) return;
-    Navigator.of(context).pushReplacement(
-      PageRouteBuilder(
-        transitionDuration: const Duration(milliseconds: 250),
-        pageBuilder: (_, __, ___) => NodeEditorScreen(
-          project: widget.project,
-          node: flat[nextIdx],
-          onSave: widget.onSave,
-          startInPreview: true,
-        ),
-        transitionsBuilder: (_, animation, __, child) {
-          final begin = Offset(forward ? 1.0 : -1.0, 0.0);
-          return SlideTransition(
-            position: Tween(begin: begin, end: Offset.zero)
-                .chain(CurveTween(curve: Curves.easeOut))
-                .animate(animation),
-            child: child,
-          );
-        },
-      ),
-    );
+
+    // コントローラーを破棄して新しいノードに切り替え
+    _titleController.dispose();
+    _articleController.dispose();
+
+    setState(() {
+      _currentNode = flat[nextIdx];
+      _previewMode = true;
+      _initForNode(_currentNode);
+    });
   }
 
   Future<String> _getMarkdown() async {
@@ -181,8 +204,8 @@ class _NodeEditorScreenState extends State<NodeEditorScreen> {
 
     final markdown = await _getMarkdown();
     final title = _titleController.text.trim();
-    if (title.isNotEmpty) widget.node.title = title;
-    widget.node.article = markdown;
+    if (title.isNotEmpty) _currentNode.title = title;
+    _currentNode.article = markdown;
     await widget.onSave();
 
     if (!mounted) return;
@@ -215,13 +238,14 @@ class _NodeEditorScreenState extends State<NodeEditorScreen> {
       isScrollControlled: true,
       builder: (ctx) => _ImageBottomSheet(
         project: widget.project,
-        node: widget.node,
+        node: _currentNode,
         currentImageUrl: _imageUrl,
+        workspace: widget.workspace,
         onImageSet: (url, bytes) {
           setState(() {
             _imageUrl = url;
             _imageBytes = bytes;
-            widget.node.imagePath = url ?? '';
+            _currentNode.imagePath = url ?? '';
             _dirty = true;
           });
         },
@@ -367,7 +391,7 @@ class _NodeEditorScreenState extends State<NodeEditorScreen> {
     return Scaffold(
       appBar: AppBar(
         title: readOnly
-            ? Text(widget.node.title)
+            ? Text(_currentNode.title)
             : TextField(
                 controller: _titleController,
                 style: Theme.of(context).textTheme.titleLarge,
@@ -476,7 +500,7 @@ class _NodeEditorScreenState extends State<NodeEditorScreen> {
                 onPressed: () {
                   setState(() {
                     _imageUrl = null;
-                    widget.node.imagePath = '';
+                    _currentNode.imagePath = '';
                     _dirty = true;
                   });
                 },
@@ -496,12 +520,14 @@ class _ImageBottomSheet extends StatefulWidget {
   final ManidocNode node;
   final String? currentImageUrl;
   final void Function(String?, Uint8List?) onImageSet;
+  final WorkspaceInfo? workspace;
 
   const _ImageBottomSheet({
     required this.project,
     required this.node,
     required this.currentImageUrl,
     required this.onImageSet,
+    this.workspace,
   });
 
   @override
@@ -512,6 +538,7 @@ class _ImageBottomSheetState extends State<_ImageBottomSheet> {
   final _gemini = GeminiService();
   final _driveService = DriveService();
   final _localService = LocalStorageService();
+  final _syncService = SyncService();
   final _aiPromptController = TextEditingController();
   bool _loading = false;
   String? _errorMsg;
@@ -612,6 +639,14 @@ class _ImageBottomSheetState extends State<_ImageBottomSheet> {
       if (imageUrl == null) {
         setState(() => _errorMsg = 'Drive にアップロードできませんでした');
         return;
+      }
+
+      // アップロード成功時にキャッシュにも保存
+      if (widget.workspace != null && imageUrl.startsWith('images/')) {
+        final fileName = imageUrl.substring('images/'.length);
+        final type = widget.project.isReadOnly ? 'windows' : 'android';
+        await _syncService.cacheImage(
+          widget.workspace!, type, widget.project.id, fileName, bytes);
       }
 
       if (mounted) {

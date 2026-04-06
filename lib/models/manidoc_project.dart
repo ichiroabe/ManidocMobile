@@ -22,6 +22,9 @@ class ManidocProject {
   // ローカルメタデータ（Windows用・JSONに保存しない）
   String? localFilePath;
 
+  // オフラインキャッシュ用（JSONに保存しない）
+  bool isDirty;
+
   ManidocProject({
     required this.id,
     required this.name,
@@ -37,6 +40,7 @@ class ManidocProject {
     this.driveFolderId,
     this.isReadOnly = false,
     this.hasProjectFolder = false,
+    this.isDirty = false,
   })  : createdAt = createdAt ?? DateTime.now(),
         lastModifiedAt = lastModifiedAt ?? DateTime.now(),
         rootNodes = rootNodes ?? [];
