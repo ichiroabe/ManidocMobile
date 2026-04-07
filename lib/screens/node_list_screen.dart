@@ -124,6 +124,45 @@ class _NodeListScreenState extends State<NodeListScreen> {
     await _save();
   }
 
+  /// 左スワイプ: 1つ下の階層へ（直上の兄弟の子にする）
+  void _indentNode(ManidocNode node) async {
+    final siblings = _findSiblings(node);
+    if (siblings == null) return;
+    final index = siblings.indexWhere((n) => n.id == node.id);
+    if (index <= 0) return; // 先頭ノードはインデント不可
+    final newParent = siblings[index - 1];
+    setState(() {
+      siblings.removeAt(index);
+      newParent.children.add(node);
+    });
+    await _save();
+  }
+
+  /// 右スワイプ: 1つ上の階層へ（親の兄弟リストに移動）
+  void _outdentNode(ManidocNode node) async {
+    // ルートノードはアウトデント不可
+    if (widget.project.rootNodes.any((n) => n.id == node.id)) return;
+    final parent = _findParent(widget.project.rootNodes, node);
+    if (parent == null) return;
+    final parentSiblings = _findSiblings(parent);
+    if (parentSiblings == null) return;
+    final parentIndex = parentSiblings.indexWhere((n) => n.id == parent.id);
+    setState(() {
+      parent.children.removeWhere((n) => n.id == node.id);
+      parentSiblings.insert(parentIndex + 1, node);
+    });
+    await _save();
+  }
+
+  ManidocNode? _findParent(List<ManidocNode> nodes, ManidocNode target) {
+    for (final n in nodes) {
+      if (n.children.any((c) => c.id == target.id)) return n;
+      final found = _findParent(n.children, target);
+      if (found != null) return found;
+    }
+    return null;
+  }
+
   void _moveToOtherParent(ManidocNode node) async {
     // 移動先候補を収集（自分自身と自分の子孫は除外）
     final candidates = <_MoveTarget>[];
@@ -349,6 +388,8 @@ class _NodeListScreenState extends State<NodeListScreen> {
                         onMoveUp: _moveNodeUp,
                         onMoveDown: _moveNodeDown,
                         onMoveToParent: _moveToOtherParent,
+                        onIndent: _indentNode,
+                        onOutdent: _outdentNode,
                       ))
                   .toList(),
             ),

@@ -13,6 +13,8 @@ class NodeTile extends StatelessWidget {
   final void Function(ManidocNode)? onMoveUp;
   final void Function(ManidocNode)? onMoveDown;
   final void Function(ManidocNode)? onMoveToParent;
+  final void Function(ManidocNode)? onIndent;
+  final void Function(ManidocNode)? onOutdent;
 
   const NodeTile({
     super.key,
@@ -27,6 +29,8 @@ class NodeTile extends StatelessWidget {
     this.onMoveUp,
     this.onMoveDown,
     this.onMoveToParent,
+    this.onIndent,
+    this.onOutdent,
   });
 
   bool get _isSelected => selectedNodeId == node.id;
@@ -41,32 +45,34 @@ class NodeTile extends StatelessWidget {
     }
 
     return ExpansionTile(
-      tilePadding: EdgeInsets.only(left: indent + 16, right: 16),
-      leading: const Icon(Icons.folder_open, size: 20),
-      title: _wrapWithHighlight(
-        context,
-        GestureDetector(
-          onTap: () => onTap(node),
-          child: Text(node.title),
+        tilePadding: EdgeInsets.only(left: indent + 16, right: 16),
+        leading: const Icon(Icons.folder_open, size: 20),
+        title: _wrapWithHighlight(
+          context,
+          GestureDetector(
+            onTap: () => onTap(node),
+            child: Text(node.title),
+          ),
         ),
-      ),
-      initiallyExpanded: true,
-      trailing: _buildTrailing(context),
-      children: node.children
-          .map((child) => NodeTile(
-                node: child,
-                depth: depth + 1,
-                readOnly: readOnly,
-                selectedNodeId: selectedNodeId,
-                onTap: onTap,
-                onAddChild: onAddChild,
-                onDelete: onDelete,
-                onRename: onRename,
-                onMoveUp: onMoveUp,
-                onMoveDown: onMoveDown,
-                onMoveToParent: onMoveToParent,
-              ))
-          .toList(),
+        initiallyExpanded: true,
+        trailing: _buildTrailing(context),
+        children: node.children
+            .map((child) => NodeTile(
+                  node: child,
+                  depth: depth + 1,
+                  readOnly: readOnly,
+                  selectedNodeId: selectedNodeId,
+                  onTap: onTap,
+                  onAddChild: onAddChild,
+                  onDelete: onDelete,
+                  onRename: onRename,
+                  onMoveUp: onMoveUp,
+                  onMoveDown: onMoveDown,
+                  onMoveToParent: onMoveToParent,
+                  onIndent: onIndent,
+                  onOutdent: onOutdent,
+                ))
+            .toList(),
     );
   }
 
@@ -128,6 +134,20 @@ class NodeTile extends StatelessWidget {
           ),
         ),
         const PopupMenuItem(
+          value: 'outdent',
+          child: ListTile(
+            leading: Icon(Icons.arrow_back),
+            title: Text('← 上の階層へ'),
+          ),
+        ),
+        const PopupMenuItem(
+          value: 'indent',
+          child: ListTile(
+            leading: Icon(Icons.arrow_forward),
+            title: Text('→ 下の階層へ'),
+          ),
+        ),
+        const PopupMenuItem(
           value: 'move_to',
           child: ListTile(
             leading: Icon(Icons.drive_file_move_outlined),
@@ -155,6 +175,10 @@ class NodeTile extends StatelessWidget {
             onMoveUp?.call(node);
           case 'move_down':
             onMoveDown?.call(node);
+          case 'outdent':
+            onOutdent?.call(node);
+          case 'indent':
+            onIndent?.call(node);
           case 'move_to':
             onMoveToParent?.call(node);
           case 'delete':
