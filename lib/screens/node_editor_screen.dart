@@ -488,7 +488,10 @@ class _NodeEditorScreenState extends State<NodeEditorScreen> {
       child: Stack(
         fit: StackFit.expand,
         children: [
-          imageWidget,
+          GestureDetector(
+            onDoubleTap: () => _showFullScreenImage(imageWidget),
+            child: imageWidget,
+          ),
           if (!widget.project.isReadOnly)
             Positioned(
               top: 4,
@@ -507,6 +510,20 @@ class _NodeEditorScreenState extends State<NodeEditorScreen> {
               ),
             ),
         ],
+      ),
+    );
+  }
+
+  void _showFullScreenImage(Widget imageWidget) {
+    showDialog(
+      context: context,
+      builder: (_) => GestureDetector(
+        onTap: () => Navigator.pop(context),
+        child: InteractiveViewer(
+          minScale: 0.5,
+          maxScale: 5.0,
+          child: Center(child: imageWidget),
+        ),
       ),
     );
   }
@@ -607,46 +624,52 @@ class _ImageBottomSheetState extends State<_ImageBottomSheet> {
     }
   }
 
-  /// Android: Driveにアップロード
+  /// Android: Driveにアップロード（オフライン時はキャッシュに保存してdirty）
   Future<void> _uploadAndSet(File file) async {
     setState(() { _loading = true; _errorMsg = null; });
 
     try {
       final bytes = await file.readAsBytes();
-      final folderId = widget.project.driveFolderId;
-      String? imageUrl;
+      final fileName = 'img_${DateTime.now().millisecondsSinceEpoch}.png';
+      final imageUrl = 'images/$fileName';
+      final online = await _syncService.isOnline();
 
-      if (folderId != null) {
-        String projectFolderId = folderId;
-        if (!widget.project.hasProjectFolder) {
-          projectFolderId = await _driveService.getOrCreateSubFolder(
-              widget.project.id, parentId: folderId) ?? folderId;
-        }
-        final imagesFolderId = await _driveService.getOrCreateSubFolder(
-          'images', parentId: projectFolderId);
-        if (imagesFolderId != null) {
-          final fileName =
-              'img_${DateTime.now().millisecondsSinceEpoch}.png';
-          final fileId = await _driveService.uploadImage(
-            file, fileName, imagesFolderId);
-          if (fileId != null) {
-            // PC版互換: 相対パスで保存
-            imageUrl = 'images/$fileName';
+      if (online) {
+        // オンライン: Driveにアップロード
+        final folderId = widget.project.driveFolderId;
+        bool uploaded = false;
+
+        if (folderId != null) {
+          String projectFolderId = folderId;
+          if (!widget.project.hasProjectFolder) {
+            projectFolderId = await _driveService.getOrCreateSubFolder(
+                widget.project.id, parentId: folderId) ?? folderId;
+          }
+          final imagesFolderId = await _driveService.getOrCreateSubFolder(
+            'images', parentId: projectFolderId);
+          if (imagesFolderId != null) {
+            final fileId = await _driveService.uploadImage(
+              file, fileName, imagesFolderId);
+            uploaded = fileId != null;
           }
         }
+
+        if (!uploaded) {
+          setState(() => _errorMsg = 'Drive にアップロードできませんでした');
+          return;
+        }
       }
 
-      if (imageUrl == null) {
-        setState(() => _errorMsg = 'Drive にアップロードできませんでした');
-        return;
-      }
-
-      // アップロード成功時にキャッシュにも保存
-      if (widget.workspace != null && imageUrl.startsWith('images/')) {
-        final fileName = imageUrl.substring('images/'.length);
+      // キャッシュに保存（オンライン・オフライン共通）
+      if (widget.workspace != null) {
         final type = widget.project.isReadOnly ? 'windows' : 'android';
         await _syncService.cacheImage(
           widget.workspace!, type, widget.project.id, fileName, bytes);
+      }
+
+      if (!online) {
+        // オフライン: プロジェクトをdirtyにして次回同期時にアップロード
+        widget.project.isDirty = true;
       }
 
       if (mounted) {

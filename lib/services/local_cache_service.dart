@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 import 'package:path_provider/path_provider.dart';
+import 'package:flutter/foundation.dart' show kIsWeb, TargetPlatform, defaultTargetPlatform;
 import '../models/manidoc_project.dart';
 import '../models/workspace_info.dart';
 
@@ -9,7 +10,14 @@ import '../models/workspace_info.dart';
 class LocalCacheService {
   /// キャッシュルートディレクトリを取得
   Future<Directory> _cacheRoot() async {
-    final appDir = await getApplicationDocumentsDirectory();
+    // Android: ApplicationSupport はアンインストール以外で消えない永続領域
+    // Windows/その他: Documents を使用
+    final Directory appDir;
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+      appDir = await getApplicationSupportDirectory();
+    } else {
+      appDir = await getApplicationDocumentsDirectory();
+    }
     return Directory('${appDir.path}/manidoc_cache');
   }
 
