@@ -421,7 +421,7 @@ class _AiAgentScreenState extends State<AiAgentScreen> {
           // Input area
           Padding(
             padding: EdgeInsets.fromLTRB(
-                8, 8, 8, MediaQuery.of(context).viewInsets.bottom + 8),
+                8, 8, 8, MediaQuery.of(context).viewInsets.bottom + MediaQuery.of(context).viewPadding.bottom + 8),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [

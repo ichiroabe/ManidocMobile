@@ -30,6 +30,7 @@ class _HomeScreenState extends State<HomeScreen>
   final _cacheService = LocalCacheService();
   late final TabController _tabController;
   StreamSubscription? _connectivitySub;
+  Timer? _syncDebounce;
 
   bool get _isWindows => Platform.isWindows;
 
@@ -54,7 +55,11 @@ class _HomeScreenState extends State<HomeScreen>
       _connectivitySub =
           Connectivity().onConnectivityChanged.listen((result) {
         if (!result.contains(ConnectivityResult.none)) {
-          _syncFromDrive();
+          // 不安定な接続での連続発火を防止（3秒デバウンス）
+          _syncDebounce?.cancel();
+          _syncDebounce = Timer(const Duration(seconds: 3), () {
+            _syncFromDrive();
+          });
         }
       });
     }
@@ -64,6 +69,7 @@ class _HomeScreenState extends State<HomeScreen>
   void dispose() {
     _tabController.dispose();
     _connectivitySub?.cancel();
+    _syncDebounce?.cancel();
     super.dispose();
   }
 

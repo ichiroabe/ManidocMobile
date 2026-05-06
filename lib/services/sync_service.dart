@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'dart:typed_data';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import '../models/manidoc_node.dart';
@@ -13,10 +14,21 @@ class SyncService {
   final _driveService = DriveService();
   final _cacheService = LocalCacheService();
 
-  /// オンラインかどうかを確認
+  /// オンラインかどうかを確認（実際のインターネット到達性をチェック）
   Future<bool> isOnline() async {
     final result = await Connectivity().checkConnectivity();
-    return !result.contains(ConnectivityResult.none);
+    if (result.contains(ConnectivityResult.none)) return false;
+
+    // ネットワークインターフェースはあるが実際に通信できるか確認
+    try {
+      final response = await HttpClient()
+          .getUrl(Uri.parse('https://www.googleapis.com/generate_204'))
+          .then((req) => req.close())
+          .timeout(const Duration(seconds: 5));
+      return response.statusCode < 500;
+    } catch (_) {
+      return false;
+    }
   }
 
   /// Pull: Driveからプロジェクト一覧を取得してキャッシュに保存
@@ -60,6 +72,12 @@ class SyncService {
             projects[i] = local;
           }
         }
+      }
+
+      // Driveから0件取得の場合、キャッシュを保護（通信不安定の可能性）
+      if (projects.isEmpty) {
+        final cached = await _cacheService.loadProjects(workspace, type);
+        return cached.isNotEmpty ? cached : projects;
       }
 
       // キャッシュに保存
