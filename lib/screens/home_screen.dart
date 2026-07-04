@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io' show Platform;
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../models/manidoc_project.dart';
 import '../models/workspace_info.dart';
 import '../services/drive_service.dart';
@@ -12,6 +13,14 @@ import 'ai_agent_screen.dart';
 import 'node_list_screen.dart';
 import 'settings_screen.dart';
 import 'workspace_select_screen.dart';
+
+enum ProjectSort {
+  modifiedDesc,
+  modifiedAsc,
+  nameAsc,
+  nameDesc,
+  createdDesc,
+}
 
 class HomeScreen extends StatefulWidget {
   final WorkspaceInfo workspace;
@@ -41,10 +50,14 @@ class _HomeScreenState extends State<HomeScreen>
   bool _loadingAndroid = true;
   bool _loadingLocal = true;
   SyncStatus _syncStatus = SyncStatus.idle;
+  ProjectSort _sort = ProjectSort.modifiedDesc;
+
+  static const _sortPrefKey = 'projectSortMode';
 
   @override
   void initState() {
     super.initState();
+    _loadSortPref();
     if (_isWindows) {
       _tabController = TabController(length: 2, vsync: this);
       _loadLocal();
@@ -71,6 +84,44 @@ class _HomeScreenState extends State<HomeScreen>
     _connectivitySub?.cancel();
     _syncDebounce?.cancel();
     super.dispose();
+  }
+
+  // ── ソート設定 ──
+  Future<void> _loadSortPref() async {
+    final prefs = await SharedPreferences.getInstance();
+    final name = prefs.getString(_sortPrefKey);
+    if (name == null) return;
+    final sort = ProjectSort.values
+        .where((s) => s.name == name)
+        .firstOrNull;
+    if (sort != null && mounted) {
+      setState(() => _sort = sort);
+    }
+  }
+
+  Future<void> _changeSort(ProjectSort sort) async {
+    setState(() => _sort = sort);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_sortPrefKey, sort.name);
+  }
+
+  List<ManidocProject> _sortedProjects(List<ManidocProject> projects) {
+    final sorted = List<ManidocProject>.from(projects);
+    switch (_sort) {
+      case ProjectSort.modifiedDesc:
+        sorted.sort((a, b) => b.lastModifiedAt.compareTo(a.lastModifiedAt));
+      case ProjectSort.modifiedAsc:
+        sorted.sort((a, b) => a.lastModifiedAt.compareTo(b.lastModifiedAt));
+      case ProjectSort.nameAsc:
+        sorted.sort(
+            (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+      case ProjectSort.nameDesc:
+        sorted.sort(
+            (a, b) => b.name.toLowerCase().compareTo(a.name.toLowerCase()));
+      case ProjectSort.createdDesc:
+        sorted.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    }
+    return sorted;
   }
 
   // ── キャッシュ優先読み込み（Android） ──
@@ -404,14 +455,16 @@ class _HomeScreenState extends State<HomeScreen>
         ),
       );
     }
+    final sorted = _sortedProjects(projects);
     return RefreshIndicator(
       onRefresh: _isWindows
           ? _loadLocal
           : (readOnly ? _syncFromDrive : _syncFromDrive),
       child: ListView.builder(
-        itemCount: projects.length,
+        padding: const EdgeInsets.only(bottom: 80),
+        itemCount: sorted.length,
         itemBuilder: (context, i) {
-          final project = projects[i];
+          final project = sorted[i];
           return ListTile(
             leading: Row(
               mainAxisSize: MainAxisSize.min,
@@ -469,6 +522,39 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
+  Widget _buildSortButton() {
+    const labels = {
+      ProjectSort.modifiedDesc: '更新日時（新しい順）',
+      ProjectSort.modifiedAsc: '更新日時（古い順）',
+      ProjectSort.nameAsc: '名前（昇順）',
+      ProjectSort.nameDesc: '名前（降順）',
+      ProjectSort.createdDesc: '作成日時（新しい順）',
+    };
+    return PopupMenuButton<ProjectSort>(
+      icon: const Icon(Icons.sort),
+      tooltip: '並べ替え',
+      onSelected: _changeSort,
+      itemBuilder: (_) => ProjectSort.values
+          .map(
+            (sort) => PopupMenuItem(
+              value: sort,
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.check,
+                    size: 18,
+                    color: sort == _sort ? null : Colors.transparent,
+                  ),
+                  const SizedBox(width: 8),
+                  Text(labels[sort]!),
+                ],
+              ),
+            ),
+          )
+          .toList(),
+    );
+  }
+
   String _formatDate(DateTime dt) {
     return '${dt.year}-${dt.month.toString().padLeft(2, '0')}-${dt.day.toString().padLeft(2, '0')}';
   }
@@ -486,6 +572,7 @@ class _HomeScreenState extends State<HomeScreen>
           ),
         ),
         actions: [
+          _buildSortButton(),
           _buildSyncIndicator(),
           IconButton(
             icon: const Icon(Icons.settings_outlined),
