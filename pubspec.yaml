@@ -99,7 +99,7 @@ flutter:
   generate: true
 
   assets:
-    - assets/editor.html
+    - assets/tiptap/
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images

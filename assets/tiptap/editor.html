@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="color-scheme" content="light">
+<link rel="stylesheet" href="editor.css">
+<title>Manidoc Editor</title>
+</head>
+<body>
+  <div id="toolbar">
+    <button id="btn-undo" class="tb" aria-label="元に戻す">↩</button>
+    <button id="btn-redo" class="tb" aria-label="やり直し">↪</button>
+    <span class="sep"></span>
+    <select id="sel-heading" class="tb-sel">
+      <option value="">本文</option>
+      <option value="1">H1</option>
+      <option value="2">H2</option>
+      <option value="3">H3</option>
+    </select>
+    <button id="btn-bold" class="tb" style="font-weight:bold">B</button>
+    <button id="btn-italic" class="tb" style="font-style:italic">I</button>
+    <button id="btn-strike" class="tb"><s>S</s></button>
+    <select id="sel-color" class="tb-sel"></select>
+    <span class="sep"></span>
+    <button id="btn-bullets" class="tb">・リスト</button>
+    <button id="btn-numbering" class="tb">1.番号</button>
+    <button id="btn-quote" class="tb">❝引用</button>
+    <span class="sep"></span>
+    <button id="btn-code" class="tb">`c`</button>
+    <button id="btn-codeblock" class="tb">{ }</button>
+    <button id="btn-hr" class="tb">―</button>
+    <span class="sep"></span>
+    <button id="btn-table" class="tb">📊表</button>
+    <button id="btn-link" class="tb">🔗</button>
+    <button id="btn-date" class="tb">📅</button>
+    <button id="btn-datetime" class="tb">🕒</button>
+    <span id="table-tools" style="display:none">
+      <span class="sep"></span>
+      <button id="btn-row-add" class="tb">行+</button>
+      <button id="btn-row-del" class="tb">行−</button>
+      <button id="btn-col-add" class="tb">列+</button>
+      <button id="btn-col-del" class="tb">列−</button>
+      <button id="btn-tbl-del" class="tb">表削除</button>
+    </span>
+  </div>
+  <div id="table-pop" class="pop">
+    <div class="pop-box">
+      <label>行 <input id="tp-rows" type="number" min="1" max="30" value="2"></label>
+      <label>列 <input id="tp-cols" type="number" min="1" max="12" value="2"></label>
+      <div class="pop-actions">
+        <button id="tp-cancel" class="tb">キャンセル</button>
+        <button id="tp-ok" class="tb primary">OK</button>
+      </div>
+    </div>
+  </div>
+  <div id="link-pop" class="pop">
+    <div class="pop-box">
+      <label>URL <input id="lp-url" type="url" inputmode="url"></label>
+      <div class="pop-actions">
+        <button id="lp-cancel" class="tb">キャンセル</button>
+        <button id="lp-ok" class="tb primary">OK</button>
+      </div>
+    </div>
+  </div>
+  <div id="main">
+    <div id="editor"></div>
+  </div>
+  <script src="editor.js"></script>
+</body>
+</html>

@@ -1,0 +1,118 @@
+/* Mobile variant of the paper look (#FAF7F2 / #2C2520) — touch-sized controls */
+* { box-sizing: border-box; }
+html, body {
+  margin: 0; padding: 0; height: 100%;
+  background: #FAF7F2; color: #2C2520;
+  font-family: "Noto Sans JP", "Hiragino Sans", "Yu Gothic", sans-serif;
+  overflow: hidden;
+  -webkit-text-size-adjust: 100%;
+}
+
+#toolbar {
+  display: flex; align-items: center; gap: 4px;
+  padding: 6px 8px;
+  background: #F1ECE4; border-bottom: 1px solid #D8D2C6;
+  user-select: none;
+  overflow-x: auto; overflow-y: hidden;
+  white-space: nowrap;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+#toolbar::-webkit-scrollbar { display: none; }
+body.readonly #toolbar { display: none; }
+
+.tb {
+  font-size: 14px; padding: 8px 12px;
+  min-width: 40px; min-height: 40px;
+  background: #FFFFFF; color: #2C2520;
+  border: 1px solid #D8D2C6; border-radius: 8px;
+  white-space: nowrap; flex: 0 0 auto;
+}
+.tb.active { background: #E2D9C8; border-color: #B8AE9C; }
+.tb.primary { background: #6C5CE7; color: #fff; border-color: #6C5CE7; }
+.tb-sel {
+  font-size: 14px; padding: 8px 4px; min-height: 40px;
+  border: 1px solid #D8D2C6; border-radius: 8px;
+  background: #FFFFFF; color: #2C2520; flex: 0 0 auto;
+}
+.sep { width: 1px; height: 24px; background: #D8D2C6; margin: 0 3px; flex: 0 0 auto; }
+
+/* modal dialogs (table insert / link URL) */
+.pop {
+  display: none; position: fixed; inset: 0; z-index: 50;
+  background: rgba(0,0,0,.35);
+  align-items: center; justify-content: center;
+}
+.pop-box {
+  background: #FFFFFF; border-radius: 12px;
+  padding: 16px; margin: 16px;
+  min-width: 240px; max-width: 90vw;
+  box-shadow: 0 8px 24px rgba(0,0,0,.25);
+  font-size: 15px;
+  display: flex; flex-direction: column; gap: 12px;
+}
+.pop-box label { display: flex; align-items: center; gap: 8px; }
+.pop-box input {
+  flex: 1; font-size: 16px; padding: 8px;
+  border: 1px solid #D8D2C6; border-radius: 8px; min-width: 0;
+}
+.pop-actions { display: flex; justify-content: flex-end; gap: 8px; }
+
+#main {
+  height: calc(100% - 53px);
+  overflow: hidden;
+}
+body.readonly #main { height: 100%; }
+#editor { height: 100%; overflow-y: auto; }
+
+/* --- document --- */
+.ProseMirror {
+  outline: none; padding: 14px 16px 40vh;
+  min-height: 100%;
+  font-size: 16px; line-height: 1.7;
+  word-wrap: break-word; overflow-wrap: break-word;
+}
+.ProseMirror p { margin: 0; }
+.ProseMirror h1 { font-size: 24px; margin: 12px 0 6px; }
+.ProseMirror h2 { font-size: 21px; margin: 12px 0 6px; }
+.ProseMirror h3 { font-size: 18px; margin: 10px 0 5px; }
+.ProseMirror h4, .ProseMirror h5, .ProseMirror h6 { font-size: 16px; margin: 8px 0 4px; }
+.ProseMirror ul, .ProseMirror ol { margin: 2px 0; padding-left: 26px; }
+.ProseMirror blockquote {
+  margin: 4px 0; padding-left: 12px;
+  border-left: 3px solid #C9C1B2; color: #55503F;
+}
+.ProseMirror pre {
+  background: #F4F1FB; border: 1px solid #E0DAF0; border-radius: 8px;
+  padding: 10px 12px; margin: 6px 0;
+  font-family: monospace; font-size: 14px;
+  white-space: pre-wrap;
+}
+.ProseMirror code { background: #ECE7DB; border-radius: 4px; padding: 0 4px; font-family: monospace; }
+.ProseMirror pre code { background: none; padding: 0; }
+.ProseMirror a { color: #2E5AAC; }
+.ProseMirror hr { border: none; border-top: 1px solid #C9C1B2; margin: 10px 0; }
+
+/* Article images use relative paths resolved only on desktop (virtual host);
+   on mobile they cannot be fetched, so show a compact placeholder instead. */
+.ProseMirror img {
+  max-height: 300px; max-width: 100%; margin: 5px 0;
+  min-width: 48px; min-height: 32px;
+  background: #EFE9DE; border: 1px dashed #B8AE9C; border-radius: 6px;
+}
+.ProseMirror img.ProseMirror-selectednode { outline: 2px solid #6C5CE7; }
+
+.ProseMirror table {
+  border-collapse: collapse; margin: 5px 0 10px; table-layout: fixed; width: auto;
+  max-width: 100%;
+}
+.ProseMirror th, .ProseMirror td {
+  border: 1px solid #999; padding: 6px 8px; min-width: 44px;
+  vertical-align: top; position: relative;
+  font-size: 14px;
+}
+.ProseMirror th { background: #EBEBEB; font-weight: bold; }
+.ProseMirror .selectedCell:after {
+  content: ""; position: absolute; inset: 0;
+  background: rgba(108, 92, 231, 0.12); pointer-events: none;
+}

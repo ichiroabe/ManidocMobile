@@ -12,6 +12,7 @@ import '../services/drive_service.dart';
 import '../services/gemini_service.dart';
 import '../services/local_storage_service.dart';
 import '../services/sync_service.dart';
+import '../widgets/webview_editor.dart';
 
 class NodeEditorScreen extends StatefulWidget {
   final ManidocProject project;
@@ -52,7 +53,11 @@ class _NodeEditorScreenState extends State<NodeEditorScreen> {
   final _gemini = GeminiService();
   final _syncService = SyncService();
 
+  // Android編集時のTiptap WebView（Windowsは従来のTextField）
+  final _webEditorKey = GlobalKey<WebViewEditorState>();
+
   bool get _isWindows => Platform.isWindows;
+  bool get _webEditorActive => !_isWindows && !_previewMode;
 
   @override
   void initState() {
@@ -190,11 +195,22 @@ class _NodeEditorScreenState extends State<NodeEditorScreen> {
   }
 
   Future<String> _getMarkdown() async {
+    // WebViewエディタ表示中はデバウンス中の未反映分があり得るため直接取得
+    final web = _webEditorActive ? _webEditorKey.currentState : null;
+    if (web != null && web.isReady) {
+      final md = await web.getMarkdown();
+      _articleController.text = md;
+      return md;
+    }
     return _articleController.text;
   }
 
   Future<void> _setMarkdown(String markdown) async {
     _articleController.text = markdown;
+    final web = _webEditorActive ? _webEditorKey.currentState : null;
+    if (web != null && web.isReady) {
+      await web.setMarkdown(markdown);
+    }
     if (!_dirty) setState(() => _dirty = true);
   }
 
@@ -362,6 +378,15 @@ class _NodeEditorScreenState extends State<NodeEditorScreen> {
         selectable: true,
       );
     }
+    if (!_isWindows) {
+      // Android: Tiptap WYSIWYGエディタ（ツールバーはWebView内）
+      return WebViewEditor(
+        key: _webEditorKey,
+        initialContent: _articleController.text,
+        readOnly: widget.project.isReadOnly,
+        onContentChanged: (md) => _articleController.text = md,
+      );
+    }
     return Column(
       children: [
         if (!widget.project.isReadOnly) _buildToolbar(),
@@ -409,7 +434,14 @@ class _NodeEditorScreenState extends State<NodeEditorScreen> {
           IconButton(
             icon: Icon(_previewMode ? Icons.edit_outlined : Icons.visibility_outlined),
             tooltip: _previewMode ? '編集' : 'プレビュー',
-            onPressed: () => setState(() => _previewMode = !_previewMode),
+            onPressed: () async {
+              if (_webEditorActive) {
+                // 編集→プレビュー: デバウンス中の内容を取り込んでから切替
+                await _getMarkdown();
+              }
+              if (!mounted) return;
+              setState(() => _previewMode = !_previewMode);
+            },
           ),
           if (!readOnly)
             IconButton(
