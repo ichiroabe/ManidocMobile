@@ -33,6 +33,7 @@
     <span class="sep"></span>
     <button id="btn-table" class="tb">📊表</button>
     <button id="btn-link" class="tb">🔗</button>
+    <button id="btn-nodelink" class="tb">[[ノード</button>
     <button id="btn-date" class="tb">📅</button>
     <button id="btn-datetime" class="tb">🕒</button>
     <span id="table-tools" style="display:none">
@@ -60,6 +61,15 @@
       <div class="pop-actions">
         <button id="lp-cancel" class="tb">キャンセル</button>
         <button id="lp-ok" class="tb primary">OK</button>
+      </div>
+    </div>
+  </div>
+  <div id="node-pop" class="pop">
+    <div class="pop-box">
+      <input id="np-filter" type="text" placeholder="ノードを検索...">
+      <div id="np-list"></div>
+      <div class="pop-actions">
+        <button id="np-cancel" class="tb">キャンセル</button>
       </div>
     </div>
   </div>

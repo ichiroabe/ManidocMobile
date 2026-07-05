@@ -133,3 +133,14 @@ body.readonly #main { height: 100%; }
   color: #6C5CE7; text-decoration: none;
   border-bottom: 1px dashed #6C5CE7;
 }
+
+/* node picker dialog */
+#np-filter {
+  width: 100%; font-size: 15px; padding: 8px 10px;
+  border: 1px solid #D8D2C6; border-radius: 8px; margin-bottom: 8px;
+  background: #FFFFFF; color: #2C2520;
+}
+#np-list {
+  max-height: 45vh; overflow-y: auto; -webkit-overflow-scrolling: touch;
+  border: 1px solid #EAE4D8; border-radius: 8px; padding: 4px;
+}
