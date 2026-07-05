@@ -176,7 +176,19 @@ class _NodeEditorScreenState extends State<NodeEditorScreen> {
     if (idx < 0) return;
     final nextIdx = forward ? idx + 1 : idx - 1;
     if (nextIdx < 0 || nextIdx >= flat.length) return;
+    await _switchToNode(flat[nextIdx]);
+  }
 
+  /// ノードリンク（#node:ID）タップでそのノードへジャンプ
+  Future<void> _jumpToNode(String nodeId) async {
+    final flat = _flattenDepthFirst();
+    final idx = flat.indexWhere((n) => n.id == nodeId);
+    if (idx < 0 || flat[idx].id == _currentNode.id) return;
+    await _switchToNode(flat[idx]);
+  }
+
+  /// ページめくり・ノードリンク共通の切替処理（必要なら保存してから移動）
+  Future<void> _switchToNode(ManidocNode target) async {
     if (_dirty && !widget.project.isReadOnly) {
       await _save();
     }
@@ -188,10 +200,24 @@ class _NodeEditorScreenState extends State<NodeEditorScreen> {
     _articleController.dispose();
 
     setState(() {
-      _currentNode = flat[nextIdx];
+      _currentNode = target;
       _previewMode = true;
       _initForNode(_currentNode);
     });
+  }
+
+  /// 「[[」補完用のノード一覧（id/タイトル/親階層パス）をJSONで返す
+  String _nodeListJson() {
+    final items = <Map<String, String>>[];
+    void walk(List<ManidocNode> nodes, String parentPath) {
+      for (final n in nodes) {
+        items.add({'id': n.id, 'title': n.title, 'path': parentPath});
+        final childPath = parentPath.isEmpty ? n.title : '$parentPath > ${n.title}';
+        walk(n.children, childPath);
+      }
+    }
+    walk(widget.project.rootNodes, '');
+    return jsonEncode(items);
   }
 
   Future<String> _getMarkdown() async {
@@ -376,6 +402,11 @@ class _NodeEditorScreenState extends State<NodeEditorScreen> {
         data: _articleController.text,
         padding: const EdgeInsets.all(16),
         selectable: true,
+        onTapLink: (text, href, title) {
+          if (href != null && href.startsWith('#node:')) {
+            _jumpToNode(href.substring('#node:'.length));
+          }
+        },
       );
     }
     if (!_isWindows) {
@@ -385,6 +416,8 @@ class _NodeEditorScreenState extends State<NodeEditorScreen> {
         initialContent: _articleController.text,
         readOnly: widget.project.isReadOnly,
         onContentChanged: (md) => _articleController.text = md,
+        nodeListJson: _nodeListJson(),
+        onNodeLinkTap: _jumpToNode,
       );
     }
     return Column(

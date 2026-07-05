@@ -17,11 +17,19 @@ class WebViewEditor extends StatefulWidget {
   /// エディタ内容が変わるたび（500msデバウンス）最新のMarkdownを通知
   final ValueChanged<String>? onContentChanged;
 
+  /// 「[[」補完に出すノード一覧（[{id,title,path}] のJSON文字列）
+  final String? nodeListJson;
+
+  /// ノードリンク（#node:ID）タップ時にノードIDを通知
+  final ValueChanged<String>? onNodeLinkTap;
+
   const WebViewEditor({
     super.key,
     required this.initialContent,
     this.readOnly = false,
     this.onContentChanged,
+    this.nodeListJson,
+    this.onNodeLinkTap,
   });
 
   @override
@@ -44,11 +52,19 @@ class WebViewEditorState extends State<WebViewEditor> {
         onMessageReceived: (msg) =>
             widget.onContentChanged?.call(msg.message),
       )
+      ..addJavaScriptChannel(
+        'NodeLinkClicked',
+        onMessageReceived: (msg) =>
+            widget.onNodeLinkTap?.call(msg.message),
+      )
       ..setNavigationDelegate(NavigationDelegate(
         onPageFinished: (_) async {
           final escaped = jsonEncode(widget.initialContent);
           final isReadOnly = widget.readOnly ? 'true' : 'false';
           await _controller.runJavaScript('initEditor($escaped, $isReadOnly)');
+          if (widget.nodeListJson != null) {
+            await _controller.runJavaScript('setNodeList(${widget.nodeListJson})');
+          }
           if (mounted) setState(() => _ready = true);
         },
       ))

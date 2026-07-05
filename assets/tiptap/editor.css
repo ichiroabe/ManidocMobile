@@ -116,3 +116,20 @@ body.readonly #main { height: 100%; }
   content: ""; position: absolute; inset: 0;
   background: rgba(108, 92, 231, 0.12); pointer-events: none;
 }
+
+/* --- node link suggestion popup ([[) --- */
+#nodelink-pop {
+  position: fixed; z-index: 100; max-height: 40vh; overflow-y: auto;
+  background: #FFFFFF; border: 1px solid #B8AE9C; border-radius: 10px;
+  box-shadow: 0 6px 18px rgba(0,0,0,.2); padding: 6px;
+  -webkit-overflow-scrolling: touch;
+}
+.nl-item { padding: 10px 12px; border-radius: 7px; }
+.nl-item:active { background: #E2D9C8; }
+.nl-title { font-size: 15px; color: #2C2520; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.nl-path { font-size: 11.5px; color: #8A8172; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.nl-empty { padding: 12px; font-size: 13px; color: #8A8172; }
+.ProseMirror a[href^="#node:"] {
+  color: #6C5CE7; text-decoration: none;
+  border-bottom: 1px dashed #6C5CE7;
+}
