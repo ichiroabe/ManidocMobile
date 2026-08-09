@@ -151,10 +151,15 @@ jobs:
           mv build/app/outputs/flutter-apk/app-release.apk \
              manidoc_mobile_android.apk
 
-      # 意図した鍵で署名されたか毎回確認する。ここに出る SHA1 が
-      # Google Cloud の OAuth クライアントに登録した値と一致していること。
+      # 意図した鍵で署名されたか毎回確認する。ここに出る SHA-1 が
+      # Google Cloud / Firebase に登録した値と一致していること。
+      # keytool -printcert -jarfile は v1(JAR)署名しか読めず、今の APK は
+      # v2/v3 署名のみなので "Not a signed jar file" になる。apksigner を使う。
       - name: Show signing certificate
-        run: keytool -printcert -jarfile manidoc_mobile_android.apk
+        run: |
+          set -euo pipefail
+          APKSIGNER="$(ls -1 "${ANDROID_HOME}"/build-tools/*/apksigner | sort -V | tail -1)"
+          "${APKSIGNER}" verify --print-certs --verbose manidoc_mobile_android.apk
 
       - uses: actions/upload-artifact@v7
         with:
