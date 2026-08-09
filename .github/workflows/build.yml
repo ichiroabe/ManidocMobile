@@ -96,8 +96,7 @@ jobs:
       # Firebase / Google サインインへの依存は無い。google-services.json も不要。
 
       # リリース署名鍵。debug キーはランナーごとに別物が自動生成されるため、
-      # それで配ると版を跨いだ上書きインストールができず、Google サインインも
-      # SHA-1 不一致で失敗する。配布物は必ずこの鍵で署名する。
+      # それで配ると版を跨いだ上書きインストールができない。配布物は必ずこの鍵で署名する。
       # 登録: キーストアを base64 化して ANDROID_KEYSTORE_BASE64 に貼る。
       - name: Restore release keystore
         env:
@@ -138,8 +137,8 @@ jobs:
           mv build/app/outputs/flutter-apk/app-release.apk \
              manidoc_mobile_android.apk
 
-      # 意図した鍵で署名されたか毎回確認する。ここに出る SHA-1 が
-      # Google Cloud / Firebase に登録した値と一致していること。
+      # 意図した鍵で署名されたか毎回確認する。ここに出る SHA-256 が
+      # リリース用キーストアのものと一致していること。
       # keytool -printcert -jarfile は v1(JAR)署名しか読めず、今の APK は
       # v2/v3 署名のみなので "Not a signed jar file" になる。apksigner を使う。
       - name: Show signing certificate
