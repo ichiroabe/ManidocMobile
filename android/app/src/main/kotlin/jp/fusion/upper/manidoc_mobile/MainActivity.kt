@@ -35,7 +35,11 @@ class MainActivity : FlutterActivity() {
             "pickTree" -> pickTree(result)
             "hasPermission" -> result.success(hasPermission(call.str("tree")))
             "listChildren" -> onIo(result) {
-                listChildren(call.str("tree"), call.strOrNull("doc"))
+                listChildren(
+                    call.str("tree"),
+                    call.strOrNull("doc"),
+                    call.argument<Boolean>("refresh") ?: false
+                )
             }
             "stat" -> onIo(result) { stat(call.str("tree"), call.str("doc")) }
             "readBytes" -> onIo(result) {
@@ -147,19 +151,80 @@ class MainActivity : FlutterActivity() {
 
     // --- 一覧・読み書き -----------------------------------------------------
 
-    private fun listChildren(tree: String, doc: String?): List<Map<String, Any?>> {
+    /// 取り直しを頼み、終わった合図が来るまで待つ。合図を取りこぼさないよう
+    /// 先に見張りを立ててから頼む。来なければ待たずに進む（古い一覧のままだが、
+    /// 次に開いたときには間に合っている）。
+    private fun waitForRefresh(uri: Uri) {
+        val done = java.util.concurrent.CountDownLatch(1)
+        val observer = object : android.database.ContentObserver(main) {
+            override fun onChange(selfChange: Boolean) = done.countDown()
+        }
+        contentResolver.registerContentObserver(uri, false, observer)
+        try {
+            val accepted = try {
+                contentResolver.refresh(uri, null, null)
+            } catch (e: Throwable) {
+                false
+            }
+            if (accepted) done.await(refreshWaitSeconds, java.util.concurrent.TimeUnit.SECONDS)
+        } finally {
+            contentResolver.unregisterContentObserver(observer)
+        }
+    }
+
+    private fun awaitChange(uri: Uri) {
+        val done = java.util.concurrent.CountDownLatch(1)
+        val observer = object : android.database.ContentObserver(main) {
+            override fun onChange(selfChange: Boolean) = done.countDown()
+        }
+        contentResolver.registerContentObserver(uri, false, observer)
+        try {
+            done.await(refreshWaitSeconds, java.util.concurrent.TimeUnit.SECONDS)
+        } finally {
+            contentResolver.unregisterContentObserver(observer)
+        }
+    }
+
+    private val refreshWaitSeconds = 15L
+
+    private val childProjection = arrayOf(
+        DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+        DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+        DocumentsContract.Document.COLUMN_MIME_TYPE,
+        DocumentsContract.Document.COLUMN_SIZE,
+        DocumentsContract.Document.COLUMN_LAST_MODIFIED
+    )
+
+    private fun listChildren(
+        tree: String,
+        doc: String?,
+        refresh: Boolean = false
+    ): List<Map<String, Any?>> {
+        val uri = childrenUri(tree, doc)
+
+        // Google ドライブのプロバイダは、フォルダの子一覧を自前のキャッシュから
+        // 返す。デスクトップ版が置いたファイルは、検索では見つかるのに一覧には
+        // 出てこない、という状態がしばらく続く（実機で確認済み）。
+        //
+        // 取り直しを頼んでも、その場では古いままの一覧が返る。取り込みが終わると
+        // 通知が飛んでくるので、それを待ってから引き直す。ファイル管理アプリが
+        // フォルダを開いたときにやっているのと同じことをしている。
+        if (refresh && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+            waitForRefresh(uri)
+        }
+
+        var cursor = contentResolver.query(uri, childProjection, null, null, null)
+
+        // 取得が終わっていない段階では EXTRA_LOADING=true を付けた
+        // 「途中までの一覧」が返る。これも通知を待って引き直す。
+        if (cursor != null && cursor.extras.getBoolean(DocumentsContract.EXTRA_LOADING, false)) {
+            awaitChange(cursor.notificationUri ?: uri)
+            cursor.close()
+            cursor = contentResolver.query(uri, childProjection, null, null, null)
+        }
+
         val out = mutableListOf<Map<String, Any?>>()
-        contentResolver.query(
-            childrenUri(tree, doc),
-            arrayOf(
-                DocumentsContract.Document.COLUMN_DOCUMENT_ID,
-                DocumentsContract.Document.COLUMN_DISPLAY_NAME,
-                DocumentsContract.Document.COLUMN_MIME_TYPE,
-                DocumentsContract.Document.COLUMN_SIZE,
-                DocumentsContract.Document.COLUMN_LAST_MODIFIED
-            ),
-            null, null, null
-        )?.use { c ->
+        cursor?.use { c ->
             while (c.moveToNext()) {
                 out.add(
                     mapOf(

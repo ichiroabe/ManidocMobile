@@ -31,7 +31,10 @@ class DriveService {
       throw StateError('ワークスペースが開かれていません');
     }
 
-    final children = await _saf.listChildren(tree, doc: folderId);
+    // 直下はワークスペースそのもの。ここだけは取り直しを頼まないと、
+    // デスクトップ版が今朝置いたプロジェクトが見えないままになる。
+    final children =
+        await _saf.listChildren(tree, doc: folderId, refresh: true);
 
     // 直下のJSON（旧形式: プロジェクト名.json）
     final direct = children

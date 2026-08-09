@@ -41,13 +41,20 @@ class SafService {
   Future<bool> hasPermission(String tree) async =>
       await _channel.invokeMethod<bool>('hasPermission', {'tree': tree}) ?? false;
 
-  Future<List<SafEntry>> listChildren(String tree, {String? doc}) async {
+  /// [refresh] を付けると、プロバイダに最新を取り直すよう頼んでから一覧を引く。
+  /// Google ドライブはキャッシュを返すので、これが無いと他所で足した
+  /// ファイルが見えない。毎回やると遅いのでワークスペース直下だけに使う。
+  Future<List<SafEntry>> listChildren(
+    String tree, {
+    String? doc,
+    bool refresh = false,
+  }) async {
     final r = await _guard(
       'フォルダの一覧',
       _listTimeout,
       () => _channel.invokeListMethod<dynamic>(
         'listChildren',
-        {'tree': tree, 'doc': doc},
+        {'tree': tree, 'doc': doc, 'refresh': refresh},
       ),
     );
     if (r == null) return [];
