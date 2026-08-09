@@ -42,6 +42,11 @@ app.*.map.json
 # Firebase / Google Services config (contains API keys)
 android/app/google-services.json
 
+# Release signing (keystore and its passwords). 絶対にコミットしないこと
+android/key.properties
+*.jks
+*.keystore
+
 # Android Studio will place build artifacts here
 /android/app/debug
 /android/app/profile

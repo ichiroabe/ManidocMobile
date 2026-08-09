@@ -108,6 +108,22 @@ jobs:
           echo "${GOOGLE_SERVICES_JSON}" | base64 -d > android/app/google-services.json
           echo "android/app/google-services.json を復元しました"
 
+      # リリース署名鍵。debug キーはランナーごとに別物が自動生成されるため、
+      # それで配ると版を跨いだ上書きインストールができず、Google サインインも
+      # SHA-1 不一致で失敗する。配布物は必ずこの鍵で署名する。
+      # 登録: キーストアを base64 化して ANDROID_KEYSTORE_BASE64 に貼る。
+      - name: Restore release keystore
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${ANDROID_KEYSTORE_BASE64}" ]]; then
+            echo "::error::Secret ANDROID_KEYSTORE_BASE64 が未設定です。リリース用キーストアを base64 化して登録してください。"
+            exit 1
+          fi
+          echo "${ANDROID_KEYSTORE_BASE64}" | base64 -d > android/app/release.keystore
+          echo "android/app/release.keystore を復元しました"
+
       - name: Install dependencies
         run: flutter pub get
 
@@ -120,6 +136,12 @@ jobs:
       # exit 79 (No tests were found) になるため、実テストを書くまで CI からは外している。
 
       - name: Build APK
+        env:
+          # storeFile は android/app からの相対パスとして解決される
+          ANDROID_KEYSTORE_PATH: release.keystore
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           flutter build apk --release \
             --build-name "${{ needs.prepare.outputs.version }}"
@@ -128,6 +150,11 @@ jobs:
         run: |
           mv build/app/outputs/flutter-apk/app-release.apk \
              manidoc_mobile_android.apk
+
+      # 意図した鍵で署名されたか毎回確認する。ここに出る SHA1 が
+      # Google Cloud の OAuth クライアントに登録した値と一致していること。
+      - name: Show signing certificate
+        run: keytool -printcert -jarfile manidoc_mobile_android.apk
 
       - uses: actions/upload-artifact@v7
         with:
