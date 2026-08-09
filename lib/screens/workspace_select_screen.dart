@@ -3,8 +3,8 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import '../models/workspace_info.dart';
 import '../services/drive_service.dart';
+import '../services/saf_service.dart';
 import '../services/workspace_service.dart';
-import '../widgets/folder_picker_dialog.dart';
 import 'home_screen.dart';
 import 'settings_screen.dart';
 
@@ -18,6 +18,7 @@ class WorkspaceSelectScreen extends StatefulWidget {
 class _WorkspaceSelectScreenState extends State<WorkspaceSelectScreen> {
   final _workspaceService = WorkspaceService();
   final _driveService = DriveService();
+  final _saf = SafService();
   List<WorkspaceInfo> _workspaces = [];
   bool _loading = true;
 
@@ -38,6 +39,19 @@ class _WorkspaceSelectScreenState extends State<WorkspaceSelectScreen> {
   }
 
   void _openWorkspace(WorkspaceInfo workspace) async {
+    // 以降の読み書きはすべてこのツリー配下で行う
+    DriveService.currentTree =
+        workspace.treeUri.isEmpty ? null : workspace.treeUri;
+    if (workspace.treeUri.isNotEmpty &&
+        !await _saf.hasPermission(workspace.treeUri)) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('フォルダへのアクセス権が失われています。追加し直してください。'),
+        ),
+      );
+      return;
+    }
     await _workspaceService.setLastWorkspaceName(workspace.name);
     if (!mounted) return;
     Navigator.of(context).pushReplacement(
@@ -72,106 +86,32 @@ class _WorkspaceSelectScreenState extends State<WorkspaceSelectScreen> {
     _load();
   }
 
-  /// Android: Driveフォルダピッカー
+  /// Android: システムのフォルダ選択。Google Drive でも端末内でも同じ手順で選べる。
+  /// 選んだフォルダがワークスペース（Windows版が書く場所）で、
+  /// このアプリの書き込み先はその中の _android。
   Future<void> _addWorkspaceAndroid() async {
-    String? windowsFolderId;
-    String? windowsFolderName;
-    String? androidFolderId;
-    String? androidFolderName;
+    final pick = await _saf.pickTree();
+    if (pick == null) return;
 
-    await showDialog(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setDialogState) => AlertDialog(
-          title: const Text('ワークスペースを追加'),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Text(
-                  'Windowsフォルダ（読み取り専用）',
-                  style: Theme.of(context).textTheme.labelMedium,
-                ),
-                const SizedBox(height: 4),
-                OutlinedButton.icon(
-                  onPressed: () async {
-                    final result = await showDialog<({String? id, String name})>(
-                      context: ctx,
-                      builder: (_) => const FolderPickerDialog(),
-                    );
-                    if (result != null && result.id != null) {
-                      setDialogState(() {
-                        windowsFolderId = result.id;
-                        windowsFolderName = result.name;
-                      });
-                    }
-                  },
-                  icon: const Icon(Icons.folder_outlined),
-                  label: Text(windowsFolderName ?? 'フォルダを選ぶ'),
-                ),
-                const SizedBox(height: 12),
-                Text(
-                  'Androidフォルダ（読み書き）',
-                  style: Theme.of(context).textTheme.labelMedium,
-                ),
-                const SizedBox(height: 4),
-                OutlinedButton.icon(
-                  onPressed: () async {
-                    final result = await showDialog<({String? id, String name})>(
-                      context: ctx,
-                      builder: (_) => const FolderPickerDialog(),
-                    );
-                    if (result != null && result.id != null) {
-                      setDialogState(() {
-                        androidFolderId = result.id;
-                        androidFolderName = result.name;
-                      });
-                    }
-                  },
-                  icon: const Icon(Icons.folder_outlined),
-                  label: Text(androidFolderName ?? 'フォルダを選ぶ'),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  '※ 未選択の場合、Windowsフォルダ内に _android フォルダを自動作成します',
-                  style: Theme.of(context).textTheme.bodySmall,
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('キャンセル'),
-            ),
-            FilledButton(
-              onPressed: windowsFolderId == null
-                  ? null
-                  : () async {
-                      String? finalAndroidId = androidFolderId ??
-                          await _driveService.getOrCreateAndroidFolder(
-                            windowsFolderId!,
-                          );
-                      if (finalAndroidId == null) {
-                        return;
-                      }
-                      if (!ctx.mounted) return;
-                      Navigator.pop(ctx, true);
-                      final workspace = WorkspaceInfo(
-                        name: windowsFolderName!,
-                        windowsFolderId: windowsFolderId!,
-                        androidFolderId: finalAndroidId,
-                      );
-                      await _workspaceService.addWorkspace(workspace);
-                      _load();
-                    },
-              child: const Text('追加'),
-            ),
-          ],
-        ),
-      ),
+    DriveService.currentTree = pick.tree;
+    final androidFolderId =
+        await _driveService.getOrCreateAndroidFolder(pick.doc);
+    if (androidFolderId == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('_android フォルダを作成できませんでした')),
+      );
+      return;
+    }
+
+    final workspace = WorkspaceInfo(
+      name: pick.name.isEmpty ? 'ワークスペース' : pick.name,
+      treeUri: pick.tree,
+      windowsFolderId: pick.doc,
+      androidFolderId: androidFolderId,
     );
+    await _workspaceService.addWorkspace(workspace);
+    _load();
   }
 
   Future<void> _removeWorkspace(int index) async {

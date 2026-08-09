@@ -1,100 +1,68 @@
 import 'dart:convert';
 import 'dart:io' as dart_io;
-import 'package:googleapis/drive/v3.dart' as drive;
+import 'dart:typed_data';
+
 import '../models/manidoc_project.dart';
-import 'auth_service.dart';
+import 'saf_service.dart';
 
+/// ワークスペースへのアクセス。中身は Storage Access Framework で、
+/// Google Drive でも端末内フォルダでも同じコードで動く（OAuth 不要）。
+///
+/// 歴史的な経緯でクラス名と `driveFileId` などの呼称はそのまま残している。
+/// 実体は「利用者が選んだツリーの中のドキュメントID」。
 class DriveService {
-  final _auth = AuthService();
+  static final _saf = SafService();
 
-  Future<drive.DriveApi?> _getApi() async {
-    final client = await _auth.getAuthClient();
-    if (client == null) return null;
-    return drive.DriveApi(client);
-  }
+  /// 現在開いているワークスペースのツリーURI。
+  /// ワークスペースを開くときに設定する。
+  static String? currentTree;
 
-  // フォルダ一覧を取得
-  Future<List<drive.File>> listFolders({String? parentId}) async {
-    final api = await _getApi();
-    if (api == null) return [];
+  static const _jsonMime = 'application/json';
 
-    final q = parentId != null
-        ? "'$parentId' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false"
-        : "mimeType = 'application/vnd.google-apps.folder' and 'root' in parents and trashed = false";
-
-    try {
-      final result = await api.files.list(
-        q: q,
-        $fields: 'files(id, name)',
-        orderBy: 'name',
-      );
-      return result.files ?? [];
-    } catch (_) {
-      return [];
-    }
-  }
+  String? get _tree => currentTree;
 
   // フォルダ内のプロジェクトJSON一覧（直下 + UUIDサブフォルダ内）
   Future<List<ProjectFileInfo>> listProjectFiles(String folderId) async {
-    final api = await _getApi();
-    if (api == null) return [];
+    final tree = _tree;
+    if (tree == null) return [];
 
     try {
-      // 直下のJSONファイル（旧形式: プロジェクト名.json）
-      final direct = await api.files.list(
-        q: "'$folderId' in parents "
-            "and name != 'workspace.settings.json' "
-            "and name contains '.json' "
-            "and trashed = false",
-        $fields: 'files(id, name, modifiedTime)',
-        orderBy: 'name',
-      );
+      final children = await _saf.listChildren(tree, doc: folderId);
 
-      // サブフォルダ一覧（新形式: UUID/ フォルダ内の UUID.json）
-      final subFolders = await api.files.list(
-        q: "'$folderId' in parents "
-            "and mimeType = 'application/vnd.google-apps.folder' "
-            "and trashed = false",
-        $fields: 'files(id, name)',
-      );
+      // 直下のJSON（旧形式: プロジェクト名.json）
+      final direct = children
+          .where((e) =>
+              !e.isDir &&
+              e.name.endsWith('.json') &&
+              e.name != 'workspace.settings.json')
+          .toList()
+        ..sort((a, b) => a.name.compareTo(b.name));
 
-      // サブフォルダをUUID名→IDのマップに変換
-      final subFolderMap = <String, String>{};
-      for (final folder in (subFolders.files ?? [])) {
-        if (folder.id != null && folder.name != null) {
-          subFolderMap[folder.name!] = folder.id!;
-        }
-      }
+      // サブフォルダ（新形式: UUID/ の中に UUID.json）
+      final subFolders = children.where((e) => e.isDir).toList();
+      final subFolderMap = {for (final f in subFolders) f.name: f.id};
 
       final results = <ProjectFileInfo>[];
 
-      // 直下のJSONファイル: 対応するUUIDフォルダがあればhasProjectFolder=true
-      for (final f in (direct.files ?? [])) {
-        final baseName = f.name?.replaceAll('.json', '') ?? '';
+      for (final f in direct) {
+        final baseName = f.name.replaceAll('.json', '');
         final projFolderId = subFolderMap[baseName];
         results.add(ProjectFileInfo(
-          file: f,
+          file: RemoteFile.fromEntry(f),
           parentFolderId: projFolderId ?? folderId,
           hasProjectFolder: projFolderId != null,
         ));
       }
 
-      // UUIDフォルダ内のJSONも走査（古いAndroid形式: JSON がフォルダ内にある場合）
-      for (final folder in (subFolders.files ?? [])) {
-        if (folder.id == null) continue;
-        final inner = await api.files.list(
-          q: "'${folder.id}' in parents "
-              "and name contains '.json' "
-              "and trashed = false",
-          $fields: 'files(id, name, modifiedTime)',
-        );
-        for (final f in (inner.files ?? [])) {
-          // 直下JSONと重複しないように（同名JSONが直下にある場合はスキップ）
+      // UUIDフォルダ内のJSONも走査（古いAndroid形式）
+      for (final folder in subFolders) {
+        final inner = await _saf.listChildren(tree, doc: folder.id);
+        for (final f in inner.where((e) => !e.isDir && e.name.endsWith('.json'))) {
           final alreadyAdded = results.any((r) => r.file.name == f.name);
           if (!alreadyAdded) {
             results.add(ProjectFileInfo(
-              file: f,
-              parentFolderId: folder.id!,
+              file: RemoteFile.fromEntry(f),
+              parentFolderId: folder.id,
               hasProjectFolder: true,
             ));
           }
@@ -109,23 +77,18 @@ class DriveService {
 
   // プロジェクトJSONを読み込む
   Future<ManidocProject?> readProject(
-    drive.File file, {
+    RemoteFile file, {
     bool readOnly = false,
     String? folderId,
     bool hasProjectFolder = false,
   }) async {
-    final api = await _getApi();
-    if (api == null || file.id == null) return null;
+    final tree = _tree;
+    if (tree == null) return null;
 
     try {
-      final media = await api.files.get(
-        file.id!,
-        downloadOptions: drive.DownloadOptions.fullMedia,
-      ) as drive.Media;
-
-      final bytes = await media.stream.expand((b) => b).toList();
-      final jsonStr = utf8.decode(bytes);
-      final json = jsonDecode(jsonStr) as Map<String, dynamic>;
+      final bytes = await _saf.readBytes(tree, file.id);
+      if (bytes == null) return null;
+      final json = jsonDecode(utf8.decode(bytes)) as Map<String, dynamic>;
 
       final project = ManidocProject.fromJson(json);
       project.driveFileId = file.id;
@@ -148,57 +111,41 @@ class DriveService {
     ManidocProject project,
     String folderId,
   ) async {
-    final api = await _getApi();
-    if (api == null) return null;
+    final tree = _tree;
+    if (tree == null) return null;
 
-    try {
-      // 1. {UUID}/ フォルダをワークスペース直下に作成
-      final projFolder = drive.File()
-        ..name = project.id
-        ..mimeType = 'application/vnd.google-apps.folder'
-        ..parents = [folderId];
-      final projFolderResult = await api.files.create(projFolder);
-      final projFolderId = projFolderResult.id!;
+    final projFolderId =
+        await _saf.createDir(tree, parent: folderId, name: project.id);
+    if (projFolderId == null) return null;
 
-      // 2. images/ と output/ をプロジェクトフォルダ内に作成
-      for (final subName in ['images', 'output']) {
-        final sub = drive.File()
-          ..name = subName
-          ..mimeType = 'application/vnd.google-apps.folder'
-          ..parents = [projFolderId];
-        await api.files.create(sub);
-      }
-
-      // 3. {UUID}.json をワークスペース直下に作成（{UUID}/の外）
-      final bytes = utf8.encode(jsonEncode(project.toJson()));
-      final file = drive.File()
-        ..name = '${project.id}.json'
-        ..parents = [folderId]   // ← ワークスペース直下
-        ..mimeType = 'application/json';
-      final media = drive.Media(Stream.value(bytes), bytes.length);
-      final result = await api.files.create(file, uploadMedia: media);
-
-      // プロジェクトフォルダID（images/の親）を保存
-      project.driveFolderId = projFolderId;
-      project.hasProjectFolder = true;
-      return result.id;
-    } catch (e) {
-      rethrow;
+    for (final subName in ['images', 'output']) {
+      await _saf.createDir(tree, parent: projFolderId, name: subName);
     }
+
+    final bytes = Uint8List.fromList(utf8.encode(jsonEncode(project.toJson())));
+    final fileId = await _saf.createFile(
+      tree,
+      parent: folderId,
+      name: '${project.id}.json',
+      mime: _jsonMime,
+      bytes: bytes,
+    );
+
+    project.driveFolderId = projFolderId;
+    project.hasProjectFolder = true;
+    return fileId;
   }
 
   // プロジェクトを上書き保存
   Future<bool> updateProject(ManidocProject project) async {
-    final api = await _getApi();
-    if (api == null || project.driveFileId == null) return false;
+    final tree = _tree;
+    if (tree == null || project.driveFileId == null) return false;
 
     try {
       project.lastModifiedAt = DateTime.now();
-      final bytes = utf8.encode(jsonEncode(project.toJson()));
-      final file = drive.File()..name = '${project.id}.json';
-      final media = drive.Media(Stream.value(bytes), bytes.length);
-      await api.files.update(file, project.driveFileId!, uploadMedia: media);
-      return true;
+      final bytes =
+          Uint8List.fromList(utf8.encode(jsonEncode(project.toJson())));
+      return await _saf.writeBytes(tree, project.driveFileId!, bytes);
     } catch (_) {
       return false;
     }
@@ -206,42 +153,28 @@ class DriveService {
 
   // ファイルを削除
   Future<void> deleteFile(String fileId) async {
-    final api = await _getApi();
-    if (api == null) return;
+    final tree = _tree;
+    if (tree == null) return;
     try {
-      await api.files.delete(fileId);
+      await _saf.delete(tree, fileId);
     } catch (_) {}
   }
 
   // 任意のフォルダを作成
   Future<String?> createFolder(String name, {String? parentId}) async {
-    final api = await _getApi();
-    if (api == null) return null;
-
-    try {
-      final folder = drive.File()
-        ..name = name
-        ..mimeType = 'application/vnd.google-apps.folder';
-      if (parentId != null) folder.parents = [parentId];
-      final created = await api.files.create(folder);
-      return created.id;
-    } catch (_) {
-      return null;
-    }
+    final tree = _tree;
+    if (tree == null) return null;
+    return _saf.createDir(tree, parent: parentId, name: name);
   }
 
   // フォルダ内のファイルを名前で検索してIDを返す
   Future<String?> findFileIdByName(String folderId, String name) async {
-    final api = await _getApi();
-    if (api == null) return null;
+    final tree = _tree;
+    if (tree == null) return null;
     try {
-      final escaped = name.replaceAll("'", "\\'");
-      final result = await api.files.list(
-        q: "'$folderId' in parents and name = '$escaped' and trashed = false",
-        $fields: 'files(id)',
-      );
-      if (result.files != null && result.files!.isNotEmpty) {
-        return result.files!.first.id;
+      final children = await _saf.listChildren(tree, doc: folderId);
+      for (final e in children) {
+        if (e.name == name) return e.id;
       }
       return null;
     } catch (_) {
@@ -251,14 +184,10 @@ class DriveService {
 
   // ファイルのバイトをダウンロード
   Future<List<int>?> downloadFileBytes(String fileId) async {
-    final api = await _getApi();
-    if (api == null) return null;
+    final tree = _tree;
+    if (tree == null) return null;
     try {
-      final media = await api.files.get(
-        fileId,
-        downloadOptions: drive.DownloadOptions.fullMedia,
-      ) as drive.Media;
-      return await media.stream.expand((b) => b).toList();
+      return await _saf.readBytes(tree, fileId);
     } catch (_) {
       return null;
     }
@@ -266,87 +195,59 @@ class DriveService {
 
   // サブフォルダを取得または作成
   Future<String?> getOrCreateSubFolder(String name, {String? parentId}) async {
-    final api = await _getApi();
-    if (api == null || parentId == null) return null;
+    final tree = _tree;
+    if (tree == null || parentId == null) return null;
 
     try {
-      final result = await api.files.list(
-        q: "'$parentId' in parents "
-            "and name = '$name' "
-            "and mimeType = 'application/vnd.google-apps.folder' "
-            "and trashed = false",
-        $fields: 'files(id)',
-      );
-
-      if (result.files != null && result.files!.isNotEmpty) {
-        return result.files!.first.id;
+      final children = await _saf.listChildren(tree, doc: parentId);
+      for (final e in children) {
+        if (e.isDir && e.name == name) return e.id;
       }
-
-      final folder = drive.File()
-        ..name = name
-        ..parents = [parentId]
-        ..mimeType = 'application/vnd.google-apps.folder';
-
-      final created = await api.files.create(folder);
-      return created.id;
+      return await _saf.createDir(tree, parent: parentId, name: name);
     } catch (_) {
       return null;
     }
   }
 
-  // 画像ファイルをアップロード → Drive file ID を返す
+  // 画像ファイルをアップロード → ドキュメントIDを返す
   Future<String?> uploadImage(
       dart_io.File file, String fileName, String folderId) async {
-    final api = await _getApi();
-    if (api == null) return null;
+    final tree = _tree;
+    if (tree == null) return null;
 
     try {
       final bytes = await file.readAsBytes();
-      final driveFile = drive.File()
-        ..name = fileName
-        ..parents = [folderId]
-        ..mimeType = 'image/png';
-      final media = drive.Media(Stream.value(bytes), bytes.length);
-      final result = await api.files.create(driveFile, uploadMedia: media);
-      return result.id;
+      return await _saf.createFile(
+        tree,
+        parent: folderId,
+        name: fileName,
+        mime: 'image/png',
+        bytes: bytes,
+      );
     } catch (_) {
       return null;
     }
   }
 
   // Android用フォルダを取得または作成
-  Future<String?> getOrCreateAndroidFolder(String parentFolderId) async {
-    final api = await _getApi();
-    if (api == null) return null;
+  Future<String?> getOrCreateAndroidFolder(String parentFolderId) =>
+      getOrCreateSubFolder('_android', parentId: parentFolderId);
+}
 
-    try {
-      final result = await api.files.list(
-        q: "'$parentFolderId' in parents "
-            "and name = '_android' "
-            "and mimeType = 'application/vnd.google-apps.folder' "
-            "and trashed = false",
-        $fields: 'files(id)',
-      );
+/// ワークスペース内のファイル1件。以前は googleapis の drive.File だった。
+class RemoteFile {
+  final String id;
+  final String name;
+  final DateTime? modifiedTime;
 
-      if (result.files != null && result.files!.isNotEmpty) {
-        return result.files!.first.id;
-      }
+  const RemoteFile({required this.id, required this.name, this.modifiedTime});
 
-      final folder = drive.File()
-        ..name = '_android'
-        ..parents = [parentFolderId]
-        ..mimeType = 'application/vnd.google-apps.folder';
-
-      final created = await api.files.create(folder);
-      return created.id;
-    } catch (_) {
-      return null;
-    }
-  }
+  factory RemoteFile.fromEntry(SafEntry e) =>
+      RemoteFile(id: e.id, name: e.name, modifiedTime: e.modified);
 }
 
 class ProjectFileInfo {
-  final drive.File file;
+  final RemoteFile file;
   final String parentFolderId;
   final bool hasProjectFolder;
   ProjectFileInfo({

@@ -36,10 +36,8 @@ dependencies:
 
   cupertino_icons: ^1.0.8
 
-  # Google認証・Drive
-  google_sign_in: ^6.2.2
-  googleapis: ^13.2.0
-  googleapis_auth: ^1.6.0
+  # ワークスペースは Storage Access Framework 経由で読み書きする（OAuth 不要）。
+  # Drive API / Google サインインへの依存は v1.1.0 で削除した。
   http: ^1.2.2
 
   # WebViewエディタ

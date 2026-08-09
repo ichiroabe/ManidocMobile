@@ -5,7 +5,6 @@ plugins {
     id("kotlin-android")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
-    id("com.google.gms.google-services")
 }
 
 // リリース署名の設定は android/key.properties（gitignore 済み）か環境変数から読む。
@@ -62,6 +61,10 @@ android {
     }
 
     buildTypes {
+        debug {
+            // リリース版と同じ端末に同居させて検証できるようにする
+            applicationIdSuffix = ".dev"
+        }
         release {
             // 署名情報が揃っていない環境では debug キーで署名する。
             // 配布物は必ず release 署名でビルドすること（鍵が変わると上書き更新できない）。

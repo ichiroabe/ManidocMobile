@@ -1,12 +1,8 @@
-import 'dart:io' show Platform;
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'l10n/app_localizations.dart';
-import 'screens/login_screen.dart';
 import 'screens/workspace_select_screen.dart';
-import 'services/auth_service.dart';
 import 'services/locale_service.dart';
-import 'services/workspace_service.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -77,64 +73,8 @@ class _ManidocAppState extends State<ManidocApp> {
         ),
       ),
       themeMode: ThemeMode.system,
-      home: Platform.isWindows
-          ? const WorkspaceSelectScreen()
-          : const AuthGate(),
+      home: const WorkspaceSelectScreen(),
     );
   }
 }
 
-class AuthGate extends StatefulWidget {
-  const AuthGate({super.key});
-
-  @override
-  State<AuthGate> createState() => _AuthGateState();
-}
-
-class _AuthGateState extends State<AuthGate> {
-  bool _checking = true;
-  bool _signedIn = false;
-  bool _hasCache = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _checkSignIn();
-  }
-
-  Future<void> _checkSignIn() async {
-    final auth = AuthService();
-    final signedIn = await auth.trySignInSilently();
-
-    if (!signedIn) {
-      // サインイン失敗時: キャッシュ（ワークスペース登録）があるか確認
-      final workspaces = await WorkspaceService().getWorkspaces();
-      if (!mounted) return;
-      setState(() {
-        _signedIn = false;
-        _hasCache = workspaces.isNotEmpty;
-        _checking = false;
-      });
-    } else {
-      if (!mounted) return;
-      setState(() {
-        _signedIn = true;
-        _checking = false;
-      });
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    if (_checking) {
-      return const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
-      );
-    }
-    // サインイン成功 or キャッシュあり → ワークスペース選択へ
-    if (_signedIn || _hasCache) {
-      return const WorkspaceSelectScreen();
-    }
-    return const LoginScreen();
-  }
-}
