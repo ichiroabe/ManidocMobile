@@ -39,18 +39,31 @@ class _WorkspaceSelectScreenState extends State<WorkspaceSelectScreen> {
   }
 
   void _openWorkspace(WorkspaceInfo workspace) async {
-    // 以降の読み書きはすべてこのツリー配下で行う
-    DriveService.currentTree =
-        workspace.treeUri.isEmpty ? null : workspace.treeUri;
-    if (workspace.treeUri.isNotEmpty &&
-        !await _saf.hasPermission(workspace.treeUri)) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('フォルダへのアクセス権が失われています。追加し直してください。'),
-        ),
-      );
-      return;
+    if (!_isWindows) {
+      // v1.0.x（Drive API 版）で登録したワークスペースにはツリーURIが無い。
+      // 黙って空のプロジェクト一覧を出すと原因が分からないので明示する。
+      if (workspace.treeUri.isEmpty) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('このワークスペースは旧バージョンで登録されたものです。'
+                '削除して追加し直してください。'),
+            duration: Duration(seconds: 5),
+          ),
+        );
+        return;
+      }
+      if (!await _saf.hasPermission(workspace.treeUri)) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('フォルダへのアクセス権が失われています。追加し直してください。'),
+          ),
+        );
+        return;
+      }
+      // 以降の読み書きはすべてこのツリー配下で行う
+      DriveService.currentTree = workspace.treeUri;
     }
     await _workspaceService.setLastWorkspaceName(workspace.name);
     if (!mounted) return;
