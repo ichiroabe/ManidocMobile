@@ -18,6 +18,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   final _auth = AuthService();
   final _apiKeyController = TextEditingController();
   final _modelController = TextEditingController();
+  final _imageModelController = TextEditingController();
   final _localLlmEndpointController =
       TextEditingController(text: 'http://localhost:1234/v1');
   bool _obscure = true;
@@ -32,14 +33,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _loadSettings() async {
     final key = await _gemini.getApiKey();
     final model = await _gemini.getModel();
+    final imageModel = await _gemini.getImageModel();
     if (!mounted) return;
     if (key != null) _apiKeyController.text = key;
     _modelController.text = model;
+    _imageModelController.text = imageModel;
   }
 
   Future<void> _save() async {
     await _gemini.setApiKey(_apiKeyController.text.trim());
     await _gemini.setModel(_modelController.text.trim());
+    await _gemini.setImageModel(_imageModelController.text.trim());
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(AppLocalizations.of(context).apiKeySaved)),
@@ -59,6 +63,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   void dispose() {
     _apiKeyController.dispose();
     _modelController.dispose();
+    _imageModelController.dispose();
     _localLlmEndpointController.dispose();
     super.dispose();
   }
@@ -197,6 +202,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               controller: _modelController,
                               decoration: _inputDecoration().copyWith(
                                 hintText: 'gemini-2.5-flash',
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          _buildRow(
+                            context,
+                            label: l.settingsImageModelLabel,
+                            child: TextField(
+                              controller: _imageModelController,
+                              decoration: _inputDecoration().copyWith(
+                                hintText: 'gemini-2.5-flash-image',
                               ),
                             ),
                           ),

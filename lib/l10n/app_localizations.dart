@@ -620,6 +620,12 @@ abstract class AppLocalizations {
   /// **'モデル名:'**
   String get settingsModelLabel;
 
+  /// No description provided for @settingsImageModelLabel.
+  ///
+  /// In ja, this message translates to:
+  /// **'画像モデル名:'**
+  String get settingsImageModelLabel;
+
   /// No description provided for @settingsModelListLink.
   ///
   /// In ja, this message translates to:

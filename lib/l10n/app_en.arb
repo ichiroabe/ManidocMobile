@@ -111,6 +111,7 @@
   "settingsProviderLabel": "AI Provider:",
   "settingsApiKeyLabel": "API Key:",
   "settingsModelLabel": "Model name:",
+  "settingsImageModelLabel": "Image model name:",
   "settingsModelListLink": "View available model names",
   "settingsEndpointLabel": "Endpoint:",
   "settingsApiKeyHint": "Get your API key from Google AI Studio."

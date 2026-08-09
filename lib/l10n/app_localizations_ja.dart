@@ -277,6 +277,9 @@ class AppLocalizationsJa extends AppLocalizations {
   String get settingsModelLabel => 'モデル名:';
 
   @override
+  String get settingsImageModelLabel => '画像モデル名:';
+
+  @override
   String get settingsModelListLink => '利用可能なモデル名を確認する';
 
   @override

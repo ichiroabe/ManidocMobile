@@ -111,6 +111,7 @@
   "settingsProviderLabel": "AIプロバイダ:",
   "settingsApiKeyLabel": "API キー:",
   "settingsModelLabel": "モデル名:",
+  "settingsImageModelLabel": "画像モデル名:",
   "settingsModelListLink": "利用可能なモデル名を確認する",
   "settingsEndpointLabel": "エンドポイント:",
   "settingsApiKeyHint": "APIキーは Google AI Studio から取得してください。"

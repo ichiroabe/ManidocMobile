@@ -279,6 +279,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get settingsModelLabel => 'Model name:';
 
   @override
+  String get settingsImageModelLabel => 'Image model name:';
+
+  @override
   String get settingsModelListLink => 'View available model names';
 
   @override

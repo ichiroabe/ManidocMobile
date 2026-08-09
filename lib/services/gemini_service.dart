@@ -6,7 +6,13 @@ import 'security_helper.dart';
 class GeminiService {
   static const _apiKeyPref = 'gemini_api_key';
   static const _modelPref = 'gemini_model';
-  static const _defaultModel = 'gemini-2.5-flash-preview-04-17';
+  static const _imageModelPref = 'gemini_image_model';
+  static const _defaultModel = 'gemini-2.5-flash';
+  static const _defaultImageModel = 'gemini-2.5-flash-image';
+
+  /// v1.0.0 までの既定値。プレビュー版は提供終了で 404 になるため、
+  /// 保存済みでも安定版へ寄せる。
+  static const _legacyPreviewModel = 'gemini-2.5-flash-preview-04-17';
 
   Future<String?> getApiKey() async {
     final prefs = await SharedPreferences.getInstance();
@@ -27,13 +33,29 @@ class GeminiService {
 
   Future<String> getModel() async {
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getString(_modelPref) ?? _defaultModel;
+    final saved = prefs.getString(_modelPref);
+    if (saved == null || saved.isEmpty || saved == _legacyPreviewModel) {
+      return _defaultModel;
+    }
+    return saved;
   }
 
   Future<void> setModel(String model) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(
         _modelPref, model.trim().isEmpty ? _defaultModel : model.trim());
+  }
+
+  Future<String> getImageModel() async {
+    final prefs = await SharedPreferences.getInstance();
+    final saved = prefs.getString(_imageModelPref);
+    return (saved == null || saved.isEmpty) ? _defaultImageModel : saved;
+  }
+
+  Future<void> setImageModel(String model) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_imageModelPref,
+        model.trim().isEmpty ? _defaultImageModel : model.trim());
   }
 
   /// REST API でコンテンツ生成（tools なし）
@@ -146,12 +168,12 @@ class GeminiService {
     return text;
   }
 
-  /// 画像生成（gemini-2.5-flash-image） → base64 PNG を返す
+  /// 画像生成（既定 gemini-2.5-flash-image・設定で変更可） → base64 PNG を返す
   Future<String?> generateImage(String prompt) async {
     final key = await getApiKey();
     if (key == null || key.isEmpty) return null;
 
-    const imageModel = 'gemini-2.5-flash-image';
+    final imageModel = await getImageModel();
     final url = Uri.parse(
       'https://generativelanguage.googleapis.com/v1beta/models/$imageModel:generateContent?key=$key',
     );
