@@ -1,0 +1,168 @@
+name: build
+
+# リリースの起点は pubspec.yaml の version。
+# 既定ブランチ (master) に push されたとき、その version に対応する v タグが
+# まだ無ければ自動でタグを切って Releases まで公開する（タグ push は不要）。
+# 手で v タグを push した場合もそのまま動く。
+on:
+  push:
+    branches: [master, main]
+    tags: ["v*"]
+  pull_request:
+    branches: [master, main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  # ローカル開発環境と同じ Flutter に固定する（Dart 3.12.2 / pubspec の sdk: ^3.10.4 を満たす）
+  FLUTTER_VERSION: "3.44.6"
+
+jobs:
+  # --- リリース対象かどうかの判定 ---
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.decide.outputs.version }}
+      tag: ${{ steps.decide.outputs.tag }}
+      should_release: ${{ steps.decide.outputs.should_release }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # 既存タグと突き合わせるため履歴とタグを全部取る
+          fetch-depth: 0
+
+      - name: Decide version and tag
+        id: decide
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            # 手動でタグを push した場合は無条件でリリース
+            TAG="${GITHUB_REF#refs/tags/}"
+            echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+            echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+            echo "should_release=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::${TAG} (タグ push) をリリースします"
+            exit 0
+          fi
+
+          # 例) "version: 1.0.1+2" -> "v1.0.1"（ビルド番号 +2 は落とす）
+          VERSION="$(sed -n 's/^version:[[:space:]]*\([0-9][0-9.]*\).*/\1/p' pubspec.yaml | head -1)"
+          if [[ -z "${VERSION}" ]]; then
+            echo "::error::pubspec.yaml から version を読み取れませんでした"
+            exit 1
+          fi
+          TAG="v${VERSION}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+
+          # PR は検証のみ（ビルドはするがリリースはしない）
+          if [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
+            echo "should_release=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::PR のためリリースはしません (version=${VERSION})"
+            exit 0
+          fi
+
+          if git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
+            echo "should_release=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::${TAG} はリリース済みのためスキップします。配布したい変更がある場合は pubspec.yaml の version を上げて push してください。"
+          else
+            echo "should_release=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::${TAG} を新規リリースします"
+          fi
+
+  build:
+    needs: prepare
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # android/app/build.gradle.kts が JavaVersion.VERSION_17 を要求する
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      # google-services.json は .gitignore で除外されているためリポジトリに無い。
+      # com.google.gms.google-services プラグインが要求するので Secret から復元する。
+      # 登録: base64 -i android/app/google-services.json | pbcopy して
+      #       リポジトリの Settings > Secrets > Actions に GOOGLE_SERVICES_JSON として貼る。
+      - name: Restore google-services.json
+        env:
+          GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${GOOGLE_SERVICES_JSON}" ]]; then
+            echo "::error::Secret GOOGLE_SERVICES_JSON が未設定です。ローカルの android/app/google-services.json を base64 化して登録してください。"
+            exit 1
+          fi
+          echo "${GOOGLE_SERVICES_JSON}" | base64 -d > android/app/google-services.json
+          echo "android/app/google-services.json を復元しました"
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      # 既存の warning/info（未使用フィールド・未使用 import・deprecated 参照）が残っているため、
+      # エラーのみを失敗条件にする。警告を潰したらこのフラグを外してよい。
+      - name: Run static analysis
+        run: flutter analyze --no-fatal-warnings --no-fatal-infos
+
+      # test/widget_test.dart が空の placeholder で `flutter test` が
+      # exit 79 (No tests were found) になるため、実テストを書くまで CI からは外している。
+
+      - name: Build APK
+        run: |
+          flutter build apk --release \
+            --build-name "${{ needs.prepare.outputs.version }}"
+
+      - name: Rename APK
+        run: |
+          mv build/app/outputs/flutter-apk/app-release.apk \
+             manidoc_mobile_android.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: manidoc-mobile-android
+          path: manidoc_mobile_android.apk
+          if-no-files-found: error
+
+  # ビルドが成功してから Release を作る（失敗時に中途半端な Release を残さない）
+  release:
+    needs: [prepare, build]
+    if: needs.prepare.outputs.should_release == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          set -euo pipefail
+          # main への push 起点の場合、タグはここで初めて作られる（--target で今の commit に固定）
+          if gh release view "${TAG}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            echo "::notice::${TAG} の Release は既にあるのでアセットを差し替えます"
+            gh release upload "${TAG}" dist/* --repo "${GITHUB_REPOSITORY}" --clobber
+          else
+            gh release create "${TAG}" dist/* \
+              --repo "${GITHUB_REPOSITORY}" \
+              --title "${TAG}" \
+              --target "${GITHUB_SHA}" \
+              --generate-notes
+          fi
