@@ -262,6 +262,20 @@ class AppLocalizationsJa extends AppLocalizations {
   String get aiAgentProjectCreated => 'プロジェクトを作成しました';
 
   @override
+  String get aiAgentModelTitle => '使用するモデル';
+
+  @override
+  String get aiAgentModelRefresh => '一覧を取り直す';
+
+  @override
+  String get aiAgentModelEmpty => 'モデル一覧がありません。設定画面でAPIキーを確認してください。';
+
+  @override
+  String aiAgentModelChanged(String model) {
+    return 'モデルを $model に変更しました';
+  }
+
+  @override
   String get settingsSectionAi => '画像生成 / アシスタント設定';
 
   @override

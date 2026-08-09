@@ -1,4 +1,4 @@
-import 'dart:typed_data';
+import 'dart:async';
 
 import 'package:flutter/services.dart';
 
@@ -6,6 +6,25 @@ import 'package:flutter/services.dart';
 /// ツリーURI(利用者が選んだフォルダ)とドキュメントIDの文字列だけを扱う。
 class SafService {
   static const _channel = MethodChannel('manidoc/saf');
+
+  /// 応答が返ってこないまま待ち続けないための上限。
+  /// Google ドライブのプロバイダは遅いことがあるので長めだが、無制限にはしない
+  /// （返らないと画面が読み込み中のまま固まり、理由も出せなくなる）。
+  static const _listTimeout = Duration(seconds: 60);
+  static const _ioTimeout = Duration(seconds: 120);
+
+  Future<T> _guard<T>(
+    String what,
+    Duration limit,
+    Future<T> Function() run,
+  ) async {
+    try {
+      return await run().timeout(limit);
+    } on TimeoutException {
+      throw Exception('$what: フォルダから応答がありません'
+          '（${limit.inSeconds}秒）。通信状況を確認してください。');
+    }
+  }
 
   /// フォルダ選択画面を開く。キャンセルなら null。
   Future<SafPick?> pickTree() async {
@@ -23,9 +42,13 @@ class SafService {
       await _channel.invokeMethod<bool>('hasPermission', {'tree': tree}) ?? false;
 
   Future<List<SafEntry>> listChildren(String tree, {String? doc}) async {
-    final r = await _channel.invokeListMethod<dynamic>(
-      'listChildren',
-      {'tree': tree, 'doc': doc},
+    final r = await _guard(
+      'フォルダの一覧',
+      _listTimeout,
+      () => _channel.invokeListMethod<dynamic>(
+        'listChildren',
+        {'tree': tree, 'doc': doc},
+      ),
     );
     if (r == null) return [];
     return r
@@ -36,19 +59,31 @@ class SafService {
 
   /// 1件分のメタ情報。存在しなければ null。
   Future<SafEntry?> stat(String tree, String doc) async {
-    final r = await _channel
-        .invokeMapMethod<String, dynamic>('stat', {'tree': tree, 'doc': doc});
+    final r = await _guard(
+      'ファイル情報の取得',
+      _listTimeout,
+      () => _channel
+          .invokeMapMethod<String, dynamic>('stat', {'tree': tree, 'doc': doc}),
+    );
     if (r == null) return null;
     return SafEntry.fromMap({...r, 'id': doc});
   }
 
-  Future<Uint8List?> readBytes(String tree, String doc) =>
-      _channel.invokeMethod<Uint8List>('readBytes', {'tree': tree, 'doc': doc});
+  Future<Uint8List?> readBytes(String tree, String doc) => _guard(
+        'ファイルの読み込み',
+        _ioTimeout,
+        () => _channel
+            .invokeMethod<Uint8List>('readBytes', {'tree': tree, 'doc': doc}),
+      );
 
   Future<bool> writeBytes(String tree, String doc, Uint8List bytes) async =>
-      await _channel.invokeMethod<bool>(
-        'writeBytes',
-        {'tree': tree, 'doc': doc, 'bytes': bytes},
+      await _guard<bool?>(
+        'ファイルの書き込み',
+        _ioTimeout,
+        () => _channel.invokeMethod<bool>(
+          'writeBytes',
+          {'tree': tree, 'doc': doc, 'bytes': bytes},
+        ),
       ) ??
       false;
 

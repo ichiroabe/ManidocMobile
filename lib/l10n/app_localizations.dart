@@ -590,6 +590,30 @@ abstract class AppLocalizations {
   /// **'プロジェクトを作成しました'**
   String get aiAgentProjectCreated;
 
+  /// No description provided for @aiAgentModelTitle.
+  ///
+  /// In ja, this message translates to:
+  /// **'使用するモデル'**
+  String get aiAgentModelTitle;
+
+  /// No description provided for @aiAgentModelRefresh.
+  ///
+  /// In ja, this message translates to:
+  /// **'一覧を取り直す'**
+  String get aiAgentModelRefresh;
+
+  /// No description provided for @aiAgentModelEmpty.
+  ///
+  /// In ja, this message translates to:
+  /// **'モデル一覧がありません。設定画面でAPIキーを確認してください。'**
+  String get aiAgentModelEmpty;
+
+  /// No description provided for @aiAgentModelChanged.
+  ///
+  /// In ja, this message translates to:
+  /// **'モデルを {model} に変更しました'**
+  String aiAgentModelChanged(String model);
+
   /// No description provided for @settingsSectionAi.
   ///
   /// In ja, this message translates to:

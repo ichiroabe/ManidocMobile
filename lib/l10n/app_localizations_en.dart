@@ -264,6 +264,21 @@ class AppLocalizationsEn extends AppLocalizations {
   String get aiAgentProjectCreated => 'Project created';
 
   @override
+  String get aiAgentModelTitle => 'Model to use';
+
+  @override
+  String get aiAgentModelRefresh => 'Refresh list';
+
+  @override
+  String get aiAgentModelEmpty =>
+      'No model list yet. Check your API key in Settings.';
+
+  @override
+  String aiAgentModelChanged(String model) {
+    return 'Switched to $model';
+  }
+
+  @override
   String get settingsSectionAi => 'Image generation / Assistant';
 
   @override

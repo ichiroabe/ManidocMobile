@@ -1,6 +1,4 @@
-import 'dart:async';
 import 'dart:io' show Platform;
-import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/manidoc_project.dart';
@@ -38,8 +36,6 @@ class _HomeScreenState extends State<HomeScreen>
   final _syncService = SyncService();
   final _cacheService = LocalCacheService();
   late final TabController _tabController;
-  StreamSubscription? _connectivitySub;
-  Timer? _syncDebounce;
 
   bool get _isWindows => Platform.isWindows;
 
@@ -52,6 +48,12 @@ class _HomeScreenState extends State<HomeScreen>
   SyncStatus _syncStatus = SyncStatus.idle;
   ProjectSort _sort = ProjectSort.modifiedDesc;
 
+  /// 読み込み中の進み具合。null なら読み込んでいない。
+  SyncProgress? _progress;
+
+  /// 読み込めなかった理由。無反応で終わらせないために必ず出す。
+  String? _loadError;
+
   static const _sortPrefKey = 'projectSortMode';
 
   @override
@@ -63,25 +65,12 @@ class _HomeScreenState extends State<HomeScreen>
       _loadLocal();
     } else {
       _loadWithCacheFirst();
-      // オンライン復帰時に自動同期
-      _connectivitySub =
-          Connectivity().onConnectivityChanged.listen((result) {
-        if (!result.contains(ConnectivityResult.none)) {
-          // 不安定な接続での連続発火を防止（3秒デバウンス）
-          _syncDebounce?.cancel();
-          _syncDebounce = Timer(const Duration(seconds: 3), () {
-            _syncFromDrive();
-          });
-        }
-      });
     }
   }
 
   @override
   void dispose() {
     _tabController.dispose();
-    _connectivitySub?.cancel();
-    _syncDebounce?.cancel();
     super.dispose();
   }
 
@@ -141,15 +130,17 @@ class _HomeScreenState extends State<HomeScreen>
     await _syncFromDrive();
   }
 
-  // ── Drive同期（Android） ──
+  // ── ワークスペース同期（Android） ──
   Future<void> _syncFromDrive() async {
     if (_isWindows) return;
-    if (!await _syncService.isOnline()) {
-      if (mounted) setState(() => _syncStatus = SyncStatus.offline);
-      return;
-    }
 
-    if (mounted) setState(() => _syncStatus = SyncStatus.syncing);
+    if (mounted) {
+      setState(() {
+        _syncStatus = SyncStatus.syncing;
+        _loadError = null;
+        _progress = const SyncProgress(SyncPhase.scanning);
+      });
+    }
 
     try {
       // まずdirtyなプロジェクトをPush
@@ -161,18 +152,42 @@ class _HomeScreenState extends State<HomeScreen>
         widget.workspace,
         widget.workspace.windowsFolderId,
         SyncService.workspaceType,
+        onProgress: (p) {
+          if (mounted) setState(() => _progress = p);
+        },
       );
 
       if (!mounted) return;
+      // 画像を待たずに一覧を出す
       setState(() {
-        if (projects != null) {
-          _projects = projects;
-          _loading = false;
-        }
+        _projects = projects;
+        _loading = false;
         _syncStatus = SyncStatus.idle;
       });
-    } catch (_) {
-      if (mounted) setState(() => _syncStatus = SyncStatus.error);
+
+      // 画像の取り込みは枚数次第で数分かかる。一覧を出した後に回す。
+      await _syncService.cacheProjectImages(
+        widget.workspace,
+        SyncService.workspaceType,
+        projects,
+        onProgress: (p) {
+          if (mounted) setState(() => _progress = p);
+        },
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _syncStatus = SyncStatus.error;
+        _loadError = e.toString();
+      });
+    } finally {
+      // どの経路でも必ず読み込み表示を終わらせる
+      if (mounted) {
+        setState(() {
+          _loading = false;
+          _progress = null;
+        });
+      }
     }
   }
 
@@ -240,21 +255,20 @@ class _HomeScreenState extends State<HomeScreen>
       final workspaceFolderId = widget.workspace.windowsFolderId;
       project.driveFolderId = workspaceFolderId;
 
-      if (await _syncService.isOnline()) {
-        final fileId = await _driveService.createProject(
-          project,
-          workspaceFolderId,
-        );
-        if (!mounted) return;
-        if (fileId != null) {
-          project.driveFileId = fileId;
-          // キャッシュにも保存
-          await _cacheService.saveProject(
-              widget.workspace, SyncService.workspaceType, project);
-          _syncFromDrive();
-        }
+      final fileId = await _driveService.createProject(
+        project,
+        workspaceFolderId,
+      );
+      if (!mounted) return;
+
+      if (fileId != null) {
+        project.driveFileId = fileId;
+        // キャッシュにも保存
+        await _cacheService.saveProject(
+            widget.workspace, SyncService.workspaceType, project);
+        _syncFromDrive();
       } else {
-        // オフライン: キャッシュのみに保存（dirty）
+        // ワークスペースに書けなかった: 端末内にだけ残して次の同期に回す
         project.isDirty = true;
         await _cacheService.saveProject(
             widget.workspace, SyncService.workspaceType, project);
@@ -262,6 +276,13 @@ class _HomeScreenState extends State<HomeScreen>
         setState(() {
           _projects.add(project);
         });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('ワークスペースに作成できませんでした。'
+                '端末内にのみ保存しています。'),
+            duration: Duration(seconds: 5),
+          ),
+        );
       }
     }
   }
@@ -367,8 +388,8 @@ class _HomeScreenState extends State<HomeScreen>
       // キャッシュから削除
       await _cacheService.deleteProject(
           widget.workspace, SyncService.workspaceType, project.id);
-      // ワークスペースからも削除（オンラインなら）
-      if (project.driveFileId != null && await _syncService.isOnline()) {
+      // ワークスペースからも削除
+      if (project.driveFileId != null) {
         await _driveService.deleteFile(project.driveFileId!);
       }
       if (!mounted) return;
@@ -406,10 +427,6 @@ class _HomeScreenState extends State<HomeScreen>
             child: CircularProgressIndicator(strokeWidth: 2),
           ),
         );
-      case SyncStatus.offline:
-        icon = Icons.cloud_off_outlined;
-        color = Colors.grey;
-        tooltip = 'オフライン';
       case SyncStatus.error:
         icon = Icons.cloud_off_outlined;
         color = Colors.red;
@@ -423,13 +440,126 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
+  /// 進み具合の文言。「何をしていて、あと何件か」が分かるようにする。
+  String _progressLabel(SyncProgress p) {
+    switch (p.phase) {
+      case SyncPhase.scanning:
+        return 'フォルダを調べています…';
+      case SyncPhase.reading:
+        return 'プロジェクトを読み込んでいます  ${p.done} / ${p.total}';
+      case SyncPhase.images:
+        return '画像を取り込んでいます  ${p.done} / ${p.total}';
+    }
+  }
+
+  /// 初回読み込み中（一覧がまだ無い）の表示
+  Widget _buildLoadingView() {
+    final p = _progress;
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 40),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            LinearProgressIndicator(
+              value: (p != null && p.total > 0) ? p.done / p.total : null,
+            ),
+            const SizedBox(height: 16),
+            Text(
+              p == null ? '読み込んでいます…' : _progressLabel(p),
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.bodyMedium,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Google ドライブのフォルダは、件数が多いと数分かかることがあります。',
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 一覧を出した後の、裏で進んでいる処理の帯
+  Widget _buildProgressStrip() {
+    final p = _progress;
+    if (p == null) return const SizedBox.shrink();
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        LinearProgressIndicator(
+          minHeight: 2,
+          value: p.total > 0 ? p.done / p.total : null,
+        ),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  _progressLabel(p),
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// 読み込めなかったときの表示。原因を出して、やり直せるようにする。
+  Widget _buildErrorView() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 32),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.error_outline, size: 64, color: Colors.grey),
+            const SizedBox(height: 16),
+            const Text('ワークスペースを読み込めませんでした'),
+            const SizedBox(height: 8),
+            Text(
+              _loadError ?? '',
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: Theme.of(context).colorScheme.error,
+                  ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'フォルダへのアクセス権が外れている場合は、'
+              'ワークスペースを登録し直してください。',
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+            const SizedBox(height: 16),
+            FilledButton.icon(
+              onPressed: _syncFromDrive,
+              icon: const Icon(Icons.refresh),
+              label: const Text('再試行'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildProjectList(
     List<ManidocProject> projects,
     bool loading,
     bool readOnly,
   ) {
     if (loading) {
-      return const Center(child: CircularProgressIndicator());
+      return _buildLoadingView();
+    }
+    if (projects.isEmpty && _loadError != null) {
+      return _buildErrorView();
     }
     if (projects.isEmpty) {
       return Center(
@@ -589,9 +719,17 @@ class _HomeScreenState extends State<HomeScreen>
       body: TabBarView(
         controller: _tabController,
         children: [
-          _isWindows
-              ? _buildProjectList(_localProjects, _loadingLocal, false)
-              : _buildProjectList(_projects, _loading, false),
+          Column(
+            children: [
+              // 一覧を出した後も裏で画像などを取り込んでいる間は帯を出す
+              if (!_isWindows && !_loading) _buildProgressStrip(),
+              Expanded(
+                child: _isWindows
+                    ? _buildProjectList(_localProjects, _loadingLocal, false)
+                    : _buildProjectList(_projects, _loading, false),
+              ),
+            ],
+          ),
           AiAgentScreen(
             workspace: widget.workspace,
             onProjectCreated: () {
@@ -608,9 +746,9 @@ class _HomeScreenState extends State<HomeScreen>
       floatingActionButton: ListenableBuilder(
         listenable: _tabController,
         builder: (context, _) {
-          final showFab = _isWindows
-              ? _tabController.index == 0
-              : _tabController.index == 1;
+          // プロジェクトタブだけ。AIタブに出すと送信ボタンと重なる。
+          // （3タブ時代の index==1 が「Android(読み書き)」タブを指していた名残）
+          final showFab = _tabController.index == 0;
           if (!showFab) return const SizedBox.shrink();
           return FloatingActionButton.extended(
             onPressed: _createProject,

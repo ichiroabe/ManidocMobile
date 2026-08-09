@@ -39,20 +39,41 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final key = await _gemini.getApiKey();
     final model = await _gemini.getModel();
     final imageModel = await _gemini.getImageModel();
+    // 前回取得した一覧を先に出す（毎回取りに行かずに選べるように）
+    final cachedText = await _gemini.getCachedModels();
+    final cachedImage = await _gemini.getCachedImageModels();
     if (!mounted) return;
     if (key != null) _apiKeyController.text = key;
     _modelController.text = model;
     _imageModelController.text = imageModel;
+    setState(() {
+      _fetchedModels = cachedText;
+      _fetchedImageModels = cachedImage;
+      _selectedModel = cachedText.contains(model) ? model : 'custom';
+      _selectedImageModel =
+          cachedImage.contains(imageModel) ? imageModel : 'custom';
+    });
+
+    // キーはあるが一覧を持っていない（＝一度も取れていない）なら取りに行く。
+    // 🔄ボタンに気付かないと手入力のままになるため。
+    if (key != null && key.isNotEmpty && cachedText.isEmpty) {
+      await _fetchModels();
+    }
   }
 
   Future<void> _save() async {
-    await _gemini.setApiKey(_apiKeyController.text.trim());
+    final key = _apiKeyController.text.trim();
+    await _gemini.setApiKey(key);
     await _gemini.setModel(_modelController.text.trim());
     await _gemini.setImageModel(_imageModelController.text.trim());
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(AppLocalizations.of(context).apiKeySaved)),
     );
+    // 保存したキーで使えるモデルをその場で出す
+    if (key.isNotEmpty && _fetchedModels.isEmpty) {
+      await _fetchModels();
+    }
   }
 
   // 🔄ボタン: 入力中のAPIキーで使えるモデル一覧を取り直す
@@ -145,6 +166,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     label: l.settingsLanguageLabel,
                     child: DropdownButtonFormField<String>(
                       value: currentLocale,
+                      isExpanded: true,
                       decoration: _inputDecoration(),
                       items: const [
                         DropdownMenuItem(
@@ -165,6 +187,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     label: l.settingsProviderLabel,
                     child: DropdownButtonFormField<String>(
                       value: _provider,
+                      // 付けないと「Gemini API (Imagen 3)」が枠から溢れる
+                      isExpanded: true,
                       decoration: _inputDecoration(),
                       items: const [
                         DropdownMenuItem(

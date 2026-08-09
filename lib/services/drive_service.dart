@@ -21,58 +21,59 @@ class DriveService {
 
   String? get _tree => currentTree;
 
-  // フォルダ内のプロジェクトJSON一覧（直下 + UUIDサブフォルダ内）
+  /// フォルダ内のプロジェクトJSON一覧（直下 + UUIDサブフォルダ内）
+  ///
+  /// 失敗は握りつぶさず投げる。「0件」と「読めなかった」を呼び出し側で
+  /// 区別できないと、原因の分からない空一覧になるため。
   Future<List<ProjectFileInfo>> listProjectFiles(String folderId) async {
     final tree = _tree;
-    if (tree == null) return [];
+    if (tree == null) {
+      throw StateError('ワークスペースが開かれていません');
+    }
 
-    try {
-      final children = await _saf.listChildren(tree, doc: folderId);
+    final children = await _saf.listChildren(tree, doc: folderId);
 
-      // 直下のJSON（旧形式: プロジェクト名.json）
-      final direct = children
-          .where((e) =>
-              !e.isDir &&
-              e.name.endsWith('.json') &&
-              e.name != 'workspace.settings.json')
-          .toList()
-        ..sort((a, b) => a.name.compareTo(b.name));
+    // 直下のJSON（旧形式: プロジェクト名.json）
+    final direct = children
+        .where((e) =>
+            !e.isDir &&
+            e.name.endsWith('.json') &&
+            e.name != 'workspace.settings.json')
+        .toList()
+      ..sort((a, b) => a.name.compareTo(b.name));
 
-      // サブフォルダ（新形式: UUID/ の中に UUID.json）
-      final subFolders = children.where((e) => e.isDir).toList();
-      final subFolderMap = {for (final f in subFolders) f.name: f.id};
+    // サブフォルダ（新形式: UUID/ の中に UUID.json）
+    final subFolders = children.where((e) => e.isDir).toList();
+    final subFolderMap = {for (final f in subFolders) f.name: f.id};
 
-      final results = <ProjectFileInfo>[];
+    final results = <ProjectFileInfo>[];
 
-      for (final f in direct) {
-        final baseName = f.name.replaceAll('.json', '');
-        final projFolderId = subFolderMap[baseName];
-        results.add(ProjectFileInfo(
-          file: RemoteFile.fromEntry(f),
-          parentFolderId: projFolderId ?? folderId,
-          hasProjectFolder: projFolderId != null,
-        ));
-      }
+    for (final f in direct) {
+      final baseName = f.name.replaceAll('.json', '');
+      final projFolderId = subFolderMap[baseName];
+      results.add(ProjectFileInfo(
+        file: RemoteFile.fromEntry(f),
+        parentFolderId: projFolderId ?? folderId,
+        hasProjectFolder: projFolderId != null,
+      ));
+    }
 
-      // UUIDフォルダ内のJSONも走査（古いAndroid形式）
-      for (final folder in subFolders) {
-        final inner = await _saf.listChildren(tree, doc: folder.id);
-        for (final f in inner.where((e) => !e.isDir && e.name.endsWith('.json'))) {
-          final alreadyAdded = results.any((r) => r.file.name == f.name);
-          if (!alreadyAdded) {
-            results.add(ProjectFileInfo(
-              file: RemoteFile.fromEntry(f),
-              parentFolderId: folder.id,
-              hasProjectFolder: true,
-            ));
-          }
+    // UUIDフォルダ内のJSONも走査（古いAndroid形式）
+    for (final folder in subFolders) {
+      final inner = await _saf.listChildren(tree, doc: folder.id);
+      for (final f in inner.where((e) => !e.isDir && e.name.endsWith('.json'))) {
+        final alreadyAdded = results.any((r) => r.file.name == f.name);
+        if (!alreadyAdded) {
+          results.add(ProjectFileInfo(
+            file: RemoteFile.fromEntry(f),
+            parentFolderId: folder.id,
+            hasProjectFolder: true,
+          ));
         }
       }
-
-      return results;
-    } catch (_) {
-      return [];
     }
+
+    return results;
   }
 
   // プロジェクトJSONを読み込む
@@ -183,6 +184,19 @@ class DriveService {
     final tree = _tree;
     if (tree == null) return null;
     return _saf.createDir(tree, parent: parentId, name: name);
+  }
+
+  /// フォルダ直下の一覧。1件ずつ引くと通信回数が嵩むので、
+  /// 名前→IDの表を作りたい側はこれを使う。
+  Future<List<RemoteFile>> listFolder(String folderId) async {
+    final tree = _tree;
+    if (tree == null) return [];
+    try {
+      final children = await _saf.listChildren(tree, doc: folderId);
+      return children.map(RemoteFile.fromEntry).toList();
+    } catch (_) {
+      return [];
+    }
   }
 
   // フォルダ内のファイルを名前で検索してIDを返す

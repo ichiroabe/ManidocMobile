@@ -689,7 +689,9 @@ class _ImageBottomSheetState extends State<_ImageBottomSheet> {
     }
   }
 
-  /// Android: Driveにアップロード（オフライン時はキャッシュに保存してdirty）
+  /// Android: ワークスペースに書き込む。
+  /// 書けなかった場合（通信不可など）も端末内には残し、プロジェクトを
+  /// dirty にして次の同期に回す。
   Future<void> _uploadAndSet(File file) async {
     setState(() { _loading = true; _errorMsg = null; });
 
@@ -697,47 +699,47 @@ class _ImageBottomSheetState extends State<_ImageBottomSheet> {
       final bytes = await file.readAsBytes();
       final fileName = 'img_${DateTime.now().millisecondsSinceEpoch}.png';
       final imageUrl = 'images/$fileName';
-      final online = await _syncService.isOnline();
 
-      if (online) {
-        // オンライン: Driveにアップロード
-        final folderId = widget.project.driveFolderId;
-        bool uploaded = false;
+      final folderId = widget.project.driveFolderId;
+      bool uploaded = false;
 
-        if (folderId != null) {
-          String projectFolderId = folderId;
-          if (!widget.project.hasProjectFolder) {
-            projectFolderId = await _driveService.getOrCreateSubFolder(
-                widget.project.id, parentId: folderId) ?? folderId;
-          }
-          final imagesFolderId = await _driveService.getOrCreateSubFolder(
-            'images', parentId: projectFolderId);
-          if (imagesFolderId != null) {
-            final fileId = await _driveService.uploadImage(
-              file, fileName, imagesFolderId);
-            uploaded = fileId != null;
-          }
+      if (folderId != null) {
+        String projectFolderId = folderId;
+        if (!widget.project.hasProjectFolder) {
+          projectFolderId = await _driveService.getOrCreateSubFolder(
+              widget.project.id, parentId: folderId) ?? folderId;
         }
-
-        if (!uploaded) {
-          setState(() => _errorMsg = 'Drive にアップロードできませんでした');
-          return;
+        final imagesFolderId = await _driveService.getOrCreateSubFolder(
+          'images', parentId: projectFolderId);
+        if (imagesFolderId != null) {
+          final fileId = await _driveService.uploadImage(
+            file, fileName, imagesFolderId);
+          uploaded = fileId != null;
         }
       }
 
-      // キャッシュに保存（オンライン・オフライン共通）
+      // キャッシュに保存（書き込めた・書き込めなかったに関わらず）
       if (widget.workspace != null) {
         const type = SyncService.workspaceType;
         await _syncService.cacheImage(
           widget.workspace!, type, widget.project.id, fileName, bytes);
       }
 
-      if (!online) {
-        // オフライン: プロジェクトをdirtyにして次回同期時にアップロード
+      if (!uploaded) {
+        // 次回同期時にアップロードする
         widget.project.isDirty = true;
       }
 
       if (mounted) {
+        if (!uploaded) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('ワークスペースに書き込めませんでした。'
+                  '画像は端末内にのみ保存しています。'),
+              duration: Duration(seconds: 5),
+            ),
+          );
+        }
         widget.onImageSet(imageUrl, bytes);
         Navigator.pop(context);
       }

@@ -105,6 +105,10 @@
   "aiAgentClear": "Clear chat",
   "aiAgentCreateProject": "Create project from this Markdown",
   "aiAgentProjectCreated": "Project created",
+  "aiAgentModelTitle": "Model to use",
+  "aiAgentModelRefresh": "Refresh list",
+  "aiAgentModelEmpty": "No model list yet. Check your API key in Settings.",
+  "aiAgentModelChanged": "Switched to {model}",
 
   "settingsSectionAi": "Image generation / Assistant",
   "settingsLanguageLabel": "Language:",

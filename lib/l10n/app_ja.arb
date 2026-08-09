@@ -105,6 +105,15 @@
   "aiAgentClear": "チャットをクリア",
   "aiAgentCreateProject": "このMarkdownからプロジェクトを作成",
   "aiAgentProjectCreated": "プロジェクトを作成しました",
+  "aiAgentModelTitle": "使用するモデル",
+  "aiAgentModelRefresh": "一覧を取り直す",
+  "aiAgentModelEmpty": "モデル一覧がありません。設定画面でAPIキーを確認してください。",
+  "aiAgentModelChanged": "モデルを {model} に変更しました",
+  "@aiAgentModelChanged": {
+    "placeholders": {
+      "model": { "type": "String" }
+    }
+  },
 
   "settingsSectionAi": "画像生成 / アシスタント設定",
   "settingsLanguageLabel": "言語 (Language):",

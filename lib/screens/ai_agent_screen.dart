@@ -38,6 +38,12 @@ class _AiAgentScreenState extends State<AiAgentScreen> {
   bool _sending = false;
   String? _lastMarkdownOutput;
 
+  /// 送信に使うモデル。設定画面と同じ保存先を見るので、どちらで変えても揃う。
+  String _model = '';
+  List<String> _models = [];
+  bool _loadingModels = false;
+  String? _modelsError;
+
   static const _systemPromptJa =
       '【Markdown出力フォーマット】\n'
       '# プロジェクト名（H1は1つのみ）\n'
@@ -73,12 +79,146 @@ class _AiAgentScreenState extends State<AiAgentScreen> {
   @override
   void initState() {
     super.initState();
+    _loadModel();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final l = AppLocalizations.of(context);
       setState(() {
         _messages.add(_ChatMessage(role: 'assistant', content: l.aiAgentGreeting));
       });
     });
+  }
+
+  Future<void> _loadModel() async {
+    final model = await _gemini.getModel();
+    final cached = await _gemini.getCachedModels();
+    if (!mounted) return;
+    setState(() {
+      _model = model;
+      _models = cached;
+    });
+  }
+
+  /// APIキーで使えるモデル一覧を取り直す
+  Future<void> _fetchModels() async {
+    final key = await _gemini.getApiKey();
+    if (!mounted) return;
+    if (key == null || key.isEmpty) {
+      setState(() => _modelsError = AppLocalizations.of(context).aiAgentNoApiKey);
+      return;
+    }
+    setState(() {
+      _loadingModels = true;
+      _modelsError = null;
+    });
+    try {
+      final models = await _gemini.listModels(key);
+      if (!mounted) return;
+      setState(() => _models = models.text);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _modelsError = _friendlyError(e));
+    } finally {
+      if (mounted) setState(() => _loadingModels = false);
+    }
+  }
+
+  Future<void> _selectModel(String model) async {
+    await _gemini.setModel(model);
+    if (!mounted) return;
+    setState(() {
+      _model = model;
+      _messages.add(_ChatMessage(
+        role: 'assistant',
+        content: AppLocalizations.of(context).aiAgentModelChanged(model),
+      ));
+    });
+    _scrollToBottom();
+  }
+
+  /// モデル選択。一覧を持っていなければ開くときに取りに行く。
+  Future<void> _openModelSheet() async {
+    if (_models.isEmpty && !_loadingModels) {
+      await _fetchModels();
+    }
+    if (!mounted) return;
+    final l = AppLocalizations.of(context);
+    // シートは別ルートなので、画面側の setState では建て直されない。
+    // 取得中かどうかはシート自身で持つ。
+    var sheetBusy = false;
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (sheetContext) => StatefulBuilder(
+        builder: (sheetContext, setSheetState) => SafeArea(
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxHeight: MediaQuery.of(context).size.height * 0.6,
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                ListTile(
+                  title: Text(l.aiAgentModelTitle),
+                  trailing: sheetBusy
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : IconButton(
+                          icon: const Icon(Icons.refresh),
+                          tooltip: l.aiAgentModelRefresh,
+                          onPressed: () async {
+                            setSheetState(() => sheetBusy = true);
+                            await _fetchModels();
+                            if (sheetContext.mounted) {
+                              setSheetState(() => sheetBusy = false);
+                            }
+                          },
+                        ),
+                ),
+                const Divider(height: 1),
+                if (_modelsError != null)
+                  Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Text(
+                      _modelsError!,
+                      style: TextStyle(
+                          color: Theme.of(context).colorScheme.error),
+                    ),
+                  ),
+                if (_models.isEmpty && _modelsError == null)
+                  Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Text(l.aiAgentModelEmpty),
+                  ),
+                Flexible(
+                  child: ListView.builder(
+                    shrinkWrap: true,
+                    itemCount: _models.length,
+                    itemBuilder: (_, i) {
+                      final m = _models[i];
+                      return ListTile(
+                        leading: Icon(
+                          Icons.check,
+                          color: m == _model ? null : Colors.transparent,
+                        ),
+                        title: Text(m),
+                        onTap: () {
+                          Navigator.pop(sheetContext);
+                          _selectModel(m);
+                        },
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   @override
@@ -247,9 +387,11 @@ class _AiAgentScreenState extends State<AiAgentScreen> {
         }
         success = await _localService.createProject(project, path);
       } else {
+        // ワークスペース直下に作る（プロジェクトタブの新規作成と同じ場所）
+        project.driveFolderId = widget.workspace.windowsFolderId;
         final fileId = await _driveService.createProject(
           project,
-          widget.workspace.androidFolderId,
+          widget.workspace.windowsFolderId,
         );
         success = fileId != null;
       }
@@ -261,10 +403,17 @@ class _AiAgentScreenState extends State<AiAgentScreen> {
         );
         setState(() => _lastMarkdownOutput = null);
         widget.onProjectCreated?.call();
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('ワークスペースに作成できませんでした')),
+        );
       }
     } catch (e) {
       if (!mounted) return;
       setState(() => _sending = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(_friendlyError(e))),
+      );
     }
   }
 
@@ -358,11 +507,15 @@ class _AiAgentScreenState extends State<AiAgentScreen> {
       ),
       body: Column(
         children: [
-          // Toggle bar
+          // Toggle bar（モデル名が長いので Wrap。溢れずに折り返す）
           Container(
+            width: double.infinity,
             color: Theme.of(context).colorScheme.surfaceContainerHighest,
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-            child: Row(
+            child: Wrap(
+              spacing: 8,
+              runSpacing: 4,
+              crossAxisAlignment: WrapCrossAlignment.center,
               children: [
                 FilterChip(
                   label: Text(l.aiAgentWebSearch),
@@ -378,12 +531,24 @@ class _AiAgentScreenState extends State<AiAgentScreen> {
                   },
                   avatar: const Icon(Icons.search, size: 16),
                 ),
-                const SizedBox(width: 8),
                 FilterChip(
                   label: Text(l.aiAgentMdMode),
                   selected: _mdMode,
                   onSelected: (v) => setState(() => _mdMode = v),
                   avatar: const Icon(Icons.article_outlined, size: 16),
+                ),
+                ActionChip(
+                  avatar: const Icon(Icons.memory, size: 16),
+                  label: ConstrainedBox(
+                    constraints: BoxConstraints(
+                      maxWidth: MediaQuery.of(context).size.width * 0.6,
+                    ),
+                    child: Text(
+                      _model.isEmpty ? '…' : _model,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  onPressed: _openModelSheet,
                 ),
               ],
             ),

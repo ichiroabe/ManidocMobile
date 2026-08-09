@@ -7,12 +7,20 @@ class GeminiService {
   static const _apiKeyPref = 'gemini_api_key';
   static const _modelPref = 'gemini_model';
   static const _imageModelPref = 'gemini_image_model';
+  static const _modelsCachePref = 'gemini_models_cache';
+  static const _imageModelsCachePref = 'gemini_image_models_cache';
   static const _defaultModel = 'gemini-2.5-flash';
   static const _defaultImageModel = 'gemini-2.5-flash-image';
 
   /// v1.0.0 までの既定値。プレビュー版は提供終了で 404 になるため、
   /// 保存済みでも安定版へ寄せる。
   static const _legacyPreviewModel = 'gemini-2.5-flash-preview-04-17';
+
+  /// 応答が返らないまま待ち続けないように必ず打ち切る。
+  /// 一覧取得で固まると「取得できない」としか見えなくなる。
+  static const _listTimeout = Duration(seconds: 20);
+  static const _generateTimeout = Duration(seconds: 120);
+  static const _imageTimeout = Duration(seconds: 180);
 
   Future<String?> getApiKey() async {
     final prefs = await SharedPreferences.getInstance();
@@ -58,11 +66,30 @@ class GeminiService {
         model.trim().isEmpty ? _defaultImageModel : model.trim());
   }
 
+  /// 最後に取得できたモデル一覧。AIタブのモデル選択は毎回取りに行かず
+  /// これを使う（未取得なら空。設定画面か選択メニューから取得できる）。
+  Future<List<String>> getCachedModels() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getStringList(_modelsCachePref) ?? const [];
+  }
+
+  Future<List<String>> getCachedImageModels() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getStringList(_imageModelsCachePref) ?? const [];
+  }
+
+  Future<void> _cacheModels(List<String> text, List<String> image) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList(_modelsCachePref, text);
+    await prefs.setStringList(_imageModelsCachePref, image);
+  }
+
   /// APIキーで実際に使えるモデル一覧。テキスト用と画像用に振り分けて返す。
+  /// 成功したら端末内に控えておく。
   Future<({List<String> text, List<String> image})> listModels(
       String apiKey) async {
     final key = apiKey.trim();
-    if (key.isEmpty) throw Exception('API key is empty');
+    if (key.isEmpty) throw Exception('APIキーが入力されていません');
 
     final names = <String>[];
     String? pageToken;
@@ -73,10 +100,8 @@ class GeminiService {
         '?key=$key&pageSize=100'
         '${pageToken == null ? '' : '&pageToken=$pageToken'}',
       );
-      final response = await http.get(url);
-      if (response.statusCode != 200) {
-        throw Exception('HTTP ${response.statusCode}');
-      }
+      final response = await http.get(url).timeout(_listTimeout);
+      if (response.statusCode != 200) _throwHttp(response);
       final json = jsonDecode(response.body) as Map<String, dynamic>;
       final models = json['models'];
       if (models is List) {
@@ -106,7 +131,31 @@ class GeminiService {
 
     final text = names.where(isTextChat).toList()..sort(_compareModelNames);
     final image = names.where(isImage).toList()..sort(_compareModelNames);
+    await _cacheModels(text, image);
     return (text: text, image: image);
+  }
+
+  /// APIエラーは本文に理由が入っている。`HTTP 403` だけでは何も分からない。
+  Never _throwHttp(http.Response response) {
+    var detail = '';
+    try {
+      final json = jsonDecode(response.body);
+      if (json is Map<String, dynamic>) {
+        final error = json['error'];
+        if (error is Map<String, dynamic>) {
+          final status = error['status'];
+          final message = error['message'];
+          detail = [
+            if (status is String && status.isNotEmpty) status,
+            if (message is String && message.isNotEmpty) message,
+          ].join(': ');
+        }
+      }
+    } catch (_) {
+      // 本文がJSONでないこともある
+    }
+    throw Exception(
+        'HTTP ${response.statusCode}${detail.isEmpty ? '' : ' — $detail'}');
   }
 
   /// 安定版を先に、preview/experimental や日付入りスナップショットを後ろに寄せる
@@ -142,14 +191,14 @@ class GeminiService {
       ],
     });
 
-    final response = await http.post(
-      url,
-      headers: {'Content-Type': 'application/json'},
-      body: body,
-    );
-    if (response.statusCode != 200) {
-      throw Exception('HTTP ${response.statusCode}: ${response.body}');
-    }
+    final response = await http
+        .post(
+          url,
+          headers: {'Content-Type': 'application/json'},
+          body: body,
+        )
+        .timeout(_generateTimeout);
+    if (response.statusCode != 200) _throwHttp(response);
     return _extractText(response.body);
   }
 
@@ -193,14 +242,14 @@ class GeminiService {
       ],
     });
 
-    final response = await http.post(
-      url,
-      headers: {'Content-Type': 'application/json'},
-      body: body,
-    );
-    if (response.statusCode != 200) {
-      throw Exception('HTTP ${response.statusCode}: ${response.body}');
-    }
+    final response = await http
+        .post(
+          url,
+          headers: {'Content-Type': 'application/json'},
+          body: body,
+        )
+        .timeout(_generateTimeout);
+    if (response.statusCode != 200) _throwHttp(response);
 
     final text = _extractText(response.body);
     if (text == null || text.isEmpty) return null;
@@ -253,14 +302,14 @@ class GeminiService {
       'generationConfig': {'responseModalities': ['IMAGE', 'TEXT']},
     });
 
-    final response = await http.post(
-      url,
-      headers: {'Content-Type': 'application/json'},
-      body: body,
-    );
-    if (response.statusCode != 200) {
-      throw Exception('HTTP ${response.statusCode}: ${response.body}');
-    }
+    final response = await http
+        .post(
+          url,
+          headers: {'Content-Type': 'application/json'},
+          body: body,
+        )
+        .timeout(_imageTimeout);
+    if (response.statusCode != 200) _throwHttp(response);
 
     final json = jsonDecode(response.body) as Map<String, dynamic>;
     final candidates = json['candidates'] as List?;
