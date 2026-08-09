@@ -280,6 +280,21 @@ class AppLocalizationsJa extends AppLocalizations {
   String get settingsImageModelLabel => '画像モデル名:';
 
   @override
+  String get settingsFetchModels => 'APIキーで使えるモデル一覧を取得';
+
+  @override
+  String get settingsModelCustom => 'カスタム (手入力)';
+
+  @override
+  String settingsModelsFetched(int text, int image) {
+    return 'テキスト$text件 / 画像$image件を取得しました';
+  }
+
+  @override
+  String get settingsModelsFetchFailed =>
+      'モデル一覧を取得できませんでした。APIキーと通信状況を確認してください。';
+
+  @override
   String get settingsModelListLink => '利用可能なモデル名を確認する';
 
   @override

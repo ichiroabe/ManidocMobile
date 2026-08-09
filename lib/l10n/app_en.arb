@@ -112,6 +112,10 @@
   "settingsApiKeyLabel": "API Key:",
   "settingsModelLabel": "Model name:",
   "settingsImageModelLabel": "Image model name:",
+  "settingsFetchModels": "Fetch models available for this API key",
+  "settingsModelCustom": "Custom",
+  "settingsModelsFetched": "Fetched {text} text / {image} image models",
+  "settingsModelsFetchFailed": "Could not fetch the model list. Check your API key and network.",
   "settingsModelListLink": "View available model names",
   "settingsEndpointLabel": "Endpoint:",
   "settingsApiKeyHint": "Get your API key from Google AI Studio."

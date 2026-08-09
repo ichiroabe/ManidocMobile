@@ -24,6 +24,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _obscure = true;
   String _provider = 'gemini'; // gemini, localllm
 
+  // 🔄ボタンでAPIキーから取得したモデル一覧(取得前は手入力)
+  List<String> _fetchedModels = [];
+  List<String> _fetchedImageModels = [];
+  String _selectedModel = 'custom';
+  String _selectedImageModel = 'custom';
+  bool _loadingModels = false;
+  String? _modelsError;
+  String? _modelsInfo;
+
   @override
   void initState() {
     super.initState();
@@ -48,6 +57,52 @@ class _SettingsScreenState extends State<SettingsScreen> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(AppLocalizations.of(context).apiKeySaved)),
     );
+  }
+
+  // 🔄ボタン: 入力中のAPIキーで使えるモデル一覧を取り直す
+  Future<void> _fetchModels() async {
+    setState(() {
+      _loadingModels = true;
+      _modelsError = null;
+      _modelsInfo = null;
+    });
+    try {
+      final models = await _gemini.listModels(_apiKeyController.text);
+      if (!mounted) return;
+      final current = _modelController.text.trim();
+      final currentImage = _imageModelController.text.trim();
+      setState(() {
+        _fetchedModels = models.text;
+        _fetchedImageModels = models.image;
+        _selectedModel = models.text.contains(current) ? current : 'custom';
+        _selectedImageModel =
+            models.image.contains(currentImage) ? currentImage : 'custom';
+        // 画像0件のときに成功か失敗か分からなくなるので件数を出す
+        _modelsInfo = AppLocalizations.of(context)
+            .settingsModelsFetched(models.text.length, models.image.length);
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _modelsError =
+          '${AppLocalizations.of(context).settingsModelsFetchFailed}\n$e');
+    } finally {
+      if (mounted) setState(() => _loadingModels = false);
+    }
+  }
+
+  // キーが変わったら取得済み一覧は当てにならないので破棄
+  void _discardFetchedModels() {
+    if (_fetchedModels.isEmpty &&
+        _modelsError == null &&
+        _modelsInfo == null) {
+      return;
+    }
+    setState(() {
+      _fetchedModels = [];
+      _fetchedImageModels = [];
+      _modelsError = null;
+      _modelsInfo = null;
+    });
   }
 
   Future<void> _signOut() async {
@@ -192,30 +247,113 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                       setState(() => _obscure = !_obscure),
                                 ),
                               ),
+                              onChanged: (_) => _discardFetchedModels(),
                             ),
                           ),
                           const SizedBox(height: 12),
                           _buildRow(
                             context,
                             label: l.settingsModelLabel,
-                            child: TextField(
-                              controller: _modelController,
-                              decoration: _inputDecoration().copyWith(
-                                hintText: 'gemini-2.5-flash',
-                              ),
+                            child: Row(
+                              children: [
+                                Expanded(
+                                  child: _modelInput(
+                                    options: _fetchedModels,
+                                    selected: _selectedModel,
+                                    controller: _modelController,
+                                    hint: 'gemini-2.5-flash',
+                                    onSelected: (v) => setState(() {
+                                      _selectedModel = v;
+                                      if (v != 'custom') {
+                                        _modelController.text = v;
+                                      }
+                                    }),
+                                  ),
+                                ),
+                                _loadingModels
+                                    ? const Padding(
+                                        padding: EdgeInsets.only(left: 8),
+                                        child: SizedBox(
+                                          width: 20,
+                                          height: 20,
+                                          child: CircularProgressIndicator(
+                                              strokeWidth: 2),
+                                        ),
+                                      )
+                                    : IconButton(
+                                        icon: const Icon(Icons.refresh),
+                                        tooltip: l.settingsFetchModels,
+                                        onPressed: _fetchModels,
+                                      ),
+                              ],
                             ),
                           ),
+                          if (_fetchedModels.isNotEmpty &&
+                              _selectedModel == 'custom') ...[
+                            const SizedBox(height: 12),
+                            Padding(
+                              padding: const EdgeInsets.only(left: 128),
+                              child: TextField(
+                                controller: _modelController,
+                                decoration: _inputDecoration().copyWith(
+                                  hintText: 'gemini-2.5-flash',
+                                ),
+                              ),
+                            ),
+                          ],
                           const SizedBox(height: 12),
                           _buildRow(
                             context,
                             label: l.settingsImageModelLabel,
-                            child: TextField(
+                            child: _modelInput(
+                              options: _fetchedImageModels,
+                              selected: _selectedImageModel,
                               controller: _imageModelController,
-                              decoration: _inputDecoration().copyWith(
-                                hintText: 'gemini-2.5-flash-image',
-                              ),
+                              hint: 'gemini-2.5-flash-image',
+                              onSelected: (v) => setState(() {
+                                _selectedImageModel = v;
+                                if (v != 'custom') {
+                                  _imageModelController.text = v;
+                                }
+                              }),
                             ),
                           ),
+                          if (_fetchedImageModels.isNotEmpty &&
+                              _selectedImageModel == 'custom') ...[
+                            const SizedBox(height: 12),
+                            Padding(
+                              padding: const EdgeInsets.only(left: 128),
+                              child: TextField(
+                                controller: _imageModelController,
+                                decoration: _inputDecoration().copyWith(
+                                  hintText: 'gemini-2.5-flash-image',
+                                ),
+                              ),
+                            ),
+                          ],
+                          if (_modelsInfo != null) ...[
+                            const SizedBox(height: 8),
+                            Padding(
+                              padding: const EdgeInsets.only(left: 128),
+                              child: Text(
+                                _modelsInfo!,
+                                style: TextStyle(
+                                    fontSize: 12,
+                                    color: scheme.onSurfaceVariant),
+                              ),
+                            ),
+                          ],
+                          if (_modelsError != null) ...[
+                            const SizedBox(height: 8),
+                            Padding(
+                              padding: const EdgeInsets.only(left: 128),
+                              child: Text(
+                                _modelsError!,
+                                style: TextStyle(
+                                    fontSize: 12, color: scheme.error),
+                              ),
+                            ),
+                          ],
                           const SizedBox(height: 8),
                           Padding(
                             padding: const EdgeInsets.only(left: 128),
@@ -287,6 +425,42 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
         ],
       ),
+    );
+  }
+
+  /// 一覧を取得済みならドロップダウン、未取得なら手入力欄
+  Widget _modelInput({
+    required List<String> options,
+    required String selected,
+    required TextEditingController controller,
+    required String hint,
+    required ValueChanged<String> onSelected,
+  }) {
+    if (options.isEmpty) {
+      return TextField(
+        controller: controller,
+        decoration: _inputDecoration().copyWith(hintText: hint),
+      );
+    }
+    return DropdownButtonFormField<String>(
+      // 一覧や選択が入れ替わったら作り直す(initialValueの変化は反映されないため)
+      key: ValueKey('${options.length}:${options.join(',')}|$selected'),
+      initialValue: selected,
+      isExpanded: true,
+      decoration: _inputDecoration(),
+      items: [
+        ...options.map((m) => DropdownMenuItem(
+              value: m,
+              child: Text(m, overflow: TextOverflow.ellipsis),
+            )),
+        DropdownMenuItem(
+          value: 'custom',
+          child: Text(AppLocalizations.of(context).settingsModelCustom),
+        ),
+      ],
+      onChanged: (v) {
+        if (v != null) onSelected(v);
+      },
     );
   }
 

@@ -282,6 +282,21 @@ class AppLocalizationsEn extends AppLocalizations {
   String get settingsImageModelLabel => 'Image model name:';
 
   @override
+  String get settingsFetchModels => 'Fetch models available for this API key';
+
+  @override
+  String get settingsModelCustom => 'Custom';
+
+  @override
+  String settingsModelsFetched(int text, int image) {
+    return 'Fetched $text text / $image image models';
+  }
+
+  @override
+  String get settingsModelsFetchFailed =>
+      'Could not fetch the model list. Check your API key and network.';
+
+  @override
   String get settingsModelListLink => 'View available model names';
 
   @override

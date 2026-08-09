@@ -112,6 +112,16 @@
   "settingsApiKeyLabel": "API キー:",
   "settingsModelLabel": "モデル名:",
   "settingsImageModelLabel": "画像モデル名:",
+  "settingsFetchModels": "APIキーで使えるモデル一覧を取得",
+  "settingsModelCustom": "カスタム (手入力)",
+  "settingsModelsFetched": "テキスト{text}件 / 画像{image}件を取得しました",
+  "@settingsModelsFetched": {
+    "placeholders": {
+      "text": { "type": "int" },
+      "image": { "type": "int" }
+    }
+  },
+  "settingsModelsFetchFailed": "モデル一覧を取得できませんでした。APIキーと通信状況を確認してください。",
   "settingsModelListLink": "利用可能なモデル名を確認する",
   "settingsEndpointLabel": "エンドポイント:",
   "settingsApiKeyHint": "APIキーは Google AI Studio から取得してください。"

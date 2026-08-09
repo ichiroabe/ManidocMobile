@@ -626,6 +626,30 @@ abstract class AppLocalizations {
   /// **'画像モデル名:'**
   String get settingsImageModelLabel;
 
+  /// No description provided for @settingsFetchModels.
+  ///
+  /// In ja, this message translates to:
+  /// **'APIキーで使えるモデル一覧を取得'**
+  String get settingsFetchModels;
+
+  /// No description provided for @settingsModelCustom.
+  ///
+  /// In ja, this message translates to:
+  /// **'カスタム (手入力)'**
+  String get settingsModelCustom;
+
+  /// No description provided for @settingsModelsFetched.
+  ///
+  /// In ja, this message translates to:
+  /// **'テキスト{text}件 / 画像{image}件を取得しました'**
+  String settingsModelsFetched(int text, int image);
+
+  /// No description provided for @settingsModelsFetchFailed.
+  ///
+  /// In ja, this message translates to:
+  /// **'モデル一覧を取得できませんでした。APIキーと通信状況を確認してください。'**
+  String get settingsModelsFetchFailed;
+
   /// No description provided for @settingsModelListLink.
   ///
   /// In ja, this message translates to:
