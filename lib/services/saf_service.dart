@@ -34,6 +34,14 @@ class SafService {
         .toList();
   }
 
+  /// 1件分のメタ情報。存在しなければ null。
+  Future<SafEntry?> stat(String tree, String doc) async {
+    final r = await _channel
+        .invokeMapMethod<String, dynamic>('stat', {'tree': tree, 'doc': doc});
+    if (r == null) return null;
+    return SafEntry.fromMap({...r, 'id': doc});
+  }
+
   Future<Uint8List?> readBytes(String tree, String doc) =>
       _channel.invokeMethod<Uint8List>('readBytes', {'tree': tree, 'doc': doc});
 

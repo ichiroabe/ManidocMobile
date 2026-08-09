@@ -9,8 +9,17 @@ import 'local_cache_service.dart';
 
 enum SyncStatus { idle, syncing, offline, error }
 
+/// 保存の結果。conflict は「読み込んだ後に他所（デスクトップ版など）で
+/// 同じファイルが書き換わっていた」ことを示す。上書きはしていない。
+enum SaveResult { savedRemote, savedLocalOnly, conflict }
+
 /// Drive ↔ ローカルキャッシュの同期を管理するサービス
 class SyncService {
+  /// キャッシュの名前空間。以前は 'windows'（読み取り専用）と 'android'
+  /// （読み書き）に分けていたが、SAF ではワークスペース全体を読み書きできる
+  /// ため一本化した。旧キャッシュは別名なので参照されず、そのまま無視される。
+  static const workspaceType = 'workspace';
+
   final _driveService = DriveService();
   final _cacheService = LocalCacheService();
 
@@ -36,12 +45,12 @@ class SyncService {
   Future<List<ManidocProject>?> pullProjects(
     WorkspaceInfo workspace,
     String folderId,
-    String type, // 'windows' or 'android'
+    String type,
   ) async {
     if (!await isOnline()) return null;
 
     try {
-      final readOnly = type == 'windows';
+      const readOnly = false;
       final files = await _driveService.listProjectFiles(folderId);
       final projects = <ManidocProject>[];
 
@@ -108,6 +117,8 @@ class SyncService {
     var pushed = 0;
 
     for (final project in dirtyProjects) {
+      // 相手側が新しければ触らない。dirty のまま残るので編集内容は消えない。
+      if (await _isConflicting(project)) continue;
       final ok = await _driveService.updateProject(project);
       if (ok) {
         project.isDirty = false;
@@ -122,8 +133,12 @@ class SyncService {
     return pushed;
   }
 
-  /// プロジェクトをローカルに保存（＋オンラインならDriveにもPush）
-  Future<bool> saveProject(
+  /// プロジェクトをローカルに保存（＋オンラインならワークスペースにも書き戻す）
+  ///
+  /// 書き戻す前に、読み込んだ時点から相手側が変わっていないかを確認する。
+  /// 変わっていたら上書きせず conflict を返す。ローカルには保存済みなので
+  /// 編集内容が失われることはない。
+  Future<SaveResult> saveProject(
     WorkspaceInfo workspace,
     String type,
     ManidocProject project,
@@ -133,16 +148,27 @@ class SyncService {
     project.lastModifiedAt = DateTime.now();
     await _cacheService.saveProject(workspace, type, project);
 
-    // オンラインならDriveにもPush
-    if (await isOnline()) {
-      final ok = await _driveService.updateProject(project);
-      if (ok) {
-        project.isDirty = false;
-        await _cacheService.saveProject(workspace, type, project);
-        return true;
-      }
-    }
-    return false;
+    if (!await isOnline()) return SaveResult.savedLocalOnly;
+
+    if (await _isConflicting(project)) return SaveResult.conflict;
+
+    final ok = await _driveService.updateProject(project);
+    if (!ok) return SaveResult.savedLocalOnly;
+
+    project.isDirty = false;
+    await _cacheService.saveProject(workspace, type, project);
+    return SaveResult.savedRemote;
+  }
+
+  /// 読み込んだ時点の更新時刻と現物を突き合わせる。
+  /// 基準が無い（新規作成直後など）場合は衝突とみなさない。
+  Future<bool> _isConflicting(ManidocProject project) async {
+    final base = project.remoteModifiedAt;
+    final fileId = project.driveFileId;
+    if (base == null || fileId == null) return false;
+    final current = await _driveService.remoteModifiedAt(fileId);
+    if (current == null) return false;
+    return current.isAfter(base);
   }
 
   /// プロジェクト内の全画像をキャッシュ

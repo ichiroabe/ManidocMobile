@@ -43,11 +43,11 @@ class _HomeScreenState extends State<HomeScreen>
 
   bool get _isWindows => Platform.isWindows;
 
-  List<ManidocProject> _windowsProjects = [];
-  List<ManidocProject> _androidProjects = [];
+  // ワークスペースは読み書き一本。以前は Windows(読み取り専用)と
+  // Android(読み書き)に分けていたが、SAF で全体を書けるようになったため統合した。
+  List<ManidocProject> _projects = [];
   List<ManidocProject> _localProjects = [];
-  bool _loadingWindows = true;
-  bool _loadingAndroid = true;
+  bool _loading = true;
   bool _loadingLocal = true;
   SyncStatus _syncStatus = SyncStatus.idle;
   ProjectSort _sort = ProjectSort.modifiedDesc;
@@ -58,11 +58,10 @@ class _HomeScreenState extends State<HomeScreen>
   void initState() {
     super.initState();
     _loadSortPref();
+    _tabController = TabController(length: 2, vsync: this);
     if (_isWindows) {
-      _tabController = TabController(length: 2, vsync: this);
       _loadLocal();
     } else {
-      _tabController = TabController(length: 3, vsync: this);
       _loadWithCacheFirst();
       // オンライン復帰時に自動同期
       _connectivitySub =
@@ -127,24 +126,18 @@ class _HomeScreenState extends State<HomeScreen>
   // ── キャッシュ優先読み込み（Android） ──
   Future<void> _loadWithCacheFirst() async {
     // 1. まずキャッシュからすぐ表示
-    final cachedWindows =
-        await _cacheService.loadProjects(widget.workspace, 'windows');
-    final cachedAndroid =
-        await _cacheService.loadProjects(widget.workspace, 'android');
+    final cached = await _cacheService.loadProjects(
+        widget.workspace, SyncService.workspaceType);
 
     if (!mounted) return;
     setState(() {
-      if (cachedWindows.isNotEmpty) {
-        _windowsProjects = cachedWindows;
-        _loadingWindows = false;
-      }
-      if (cachedAndroid.isNotEmpty) {
-        _androidProjects = cachedAndroid;
-        _loadingAndroid = false;
+      if (cached.isNotEmpty) {
+        _projects = cached;
+        _loading = false;
       }
     });
 
-    // 2. バックグラウンドでDriveから同期
+    // 2. バックグラウンドでワークスペースから同期
     await _syncFromDrive();
   }
 
@@ -160,29 +153,21 @@ class _HomeScreenState extends State<HomeScreen>
 
     try {
       // まずdirtyなプロジェクトをPush
-      await _syncService.pushDirtyProjects(widget.workspace, 'android');
+      await _syncService.pushDirtyProjects(
+          widget.workspace, SyncService.workspaceType);
 
-      // DriveからPull
-      final windows = await _syncService.pullProjects(
+      // ワークスペース全体をPull（_android など既存のサブフォルダ内も走査される）
+      final projects = await _syncService.pullProjects(
         widget.workspace,
         widget.workspace.windowsFolderId,
-        'windows',
-      );
-      final android = await _syncService.pullProjects(
-        widget.workspace,
-        widget.workspace.androidFolderId,
-        'android',
+        SyncService.workspaceType,
       );
 
       if (!mounted) return;
       setState(() {
-        if (windows != null) {
-          _windowsProjects = windows;
-          _loadingWindows = false;
-        }
-        if (android != null) {
-          _androidProjects = android;
-          _loadingAndroid = false;
+        if (projects != null) {
+          _projects = projects;
+          _loading = false;
         }
         _syncStatus = SyncStatus.idle;
       });
@@ -251,29 +236,31 @@ class _HomeScreenState extends State<HomeScreen>
       if (!mounted) return;
       if (ok) _loadLocal();
     } else {
-      project.driveFolderId = widget.workspace.androidFolderId;
+      // 新規プロジェクトはワークスペース直下に作る（デスクトップ版と同じ場所）
+      final workspaceFolderId = widget.workspace.windowsFolderId;
+      project.driveFolderId = workspaceFolderId;
 
       if (await _syncService.isOnline()) {
         final fileId = await _driveService.createProject(
           project,
-          widget.workspace.androidFolderId,
+          workspaceFolderId,
         );
         if (!mounted) return;
         if (fileId != null) {
           project.driveFileId = fileId;
           // キャッシュにも保存
           await _cacheService.saveProject(
-              widget.workspace, 'android', project);
+              widget.workspace, SyncService.workspaceType, project);
           _syncFromDrive();
         }
       } else {
         // オフライン: キャッシュのみに保存（dirty）
         project.isDirty = true;
         await _cacheService.saveProject(
-            widget.workspace, 'android', project);
+            widget.workspace, SyncService.workspaceType, project);
         if (!mounted) return;
         setState(() {
-          _androidProjects.add(project);
+          _projects.add(project);
         });
       }
     }
@@ -334,8 +321,18 @@ class _HomeScreenState extends State<HomeScreen>
       if (!mounted) return;
       _loadLocal();
     } else {
-      await _syncService.saveProject(widget.workspace, 'android', project);
+      final result = await _syncService.saveProject(
+          widget.workspace, SyncService.workspaceType, project);
       if (!mounted) return;
+      if (result == SaveResult.conflict) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('このプロジェクトは別の端末で更新されています。'
+                '上書きを避けたため、変更は端末内にのみ保存しました。'),
+            duration: Duration(seconds: 6),
+          ),
+        );
+      }
       setState(() {});
     }
   }
@@ -369,14 +366,14 @@ class _HomeScreenState extends State<HomeScreen>
     } else {
       // キャッシュから削除
       await _cacheService.deleteProject(
-          widget.workspace, 'android', project.id);
-      // Driveからも削除（オンラインなら）
+          widget.workspace, SyncService.workspaceType, project.id);
+      // ワークスペースからも削除（オンラインなら）
       if (project.driveFileId != null && await _syncService.isOnline()) {
         await _driveService.deleteFile(project.driveFileId!);
       }
       if (!mounted) return;
       setState(() {
-        _androidProjects.removeWhere((p) => p.id == project.id);
+        _projects.removeWhere((p) => p.id == project.id);
       });
     }
   }
@@ -390,8 +387,7 @@ class _HomeScreenState extends State<HomeScreen>
 
     switch (_syncStatus) {
       case SyncStatus.idle:
-        final dirtyCount =
-            _androidProjects.where((p) => p.isDirty).length;
+        final dirtyCount = _projects.where((p) => p.isDirty).length;
         if (dirtyCount > 0) {
           icon = Icons.cloud_upload_outlined;
           color = Colors.orange;
@@ -584,42 +580,30 @@ class _HomeScreenState extends State<HomeScreen>
         ],
         bottom: TabBar(
           controller: _tabController,
-          tabs: _isWindows
-              ? const [
-                  Tab(icon: Icon(Icons.folder_outlined), text: 'プロジェクト'),
-                  Tab(icon: Icon(Icons.smart_toy_outlined), text: 'AI'),
-                ]
-              : const [
-                  Tab(icon: Icon(Icons.computer), text: 'Windows'),
-                  Tab(icon: Icon(Icons.phone_android), text: 'Android'),
-                  Tab(icon: Icon(Icons.smart_toy_outlined), text: 'AI'),
-                ],
+          tabs: const [
+            Tab(icon: Icon(Icons.folder_outlined), text: 'プロジェクト'),
+            Tab(icon: Icon(Icons.smart_toy_outlined), text: 'AI'),
+          ],
         ),
       ),
       body: TabBarView(
         controller: _tabController,
-        children: _isWindows
-            ? [
-                _buildProjectList(_localProjects, _loadingLocal, false),
-                AiAgentScreen(
-                  workspace: widget.workspace,
-                  onProjectCreated: () {
-                    _loadLocal();
-                    _tabController.animateTo(0);
-                  },
-                ),
-              ]
-            : [
-                _buildProjectList(_windowsProjects, _loadingWindows, true),
-                _buildProjectList(_androidProjects, _loadingAndroid, false),
-                AiAgentScreen(
-                  workspace: widget.workspace,
-                  onProjectCreated: () {
-                    _syncFromDrive();
-                    _tabController.animateTo(1);
-                  },
-                ),
-              ],
+        children: [
+          _isWindows
+              ? _buildProjectList(_localProjects, _loadingLocal, false)
+              : _buildProjectList(_projects, _loading, false),
+          AiAgentScreen(
+            workspace: widget.workspace,
+            onProjectCreated: () {
+              if (_isWindows) {
+                _loadLocal();
+              } else {
+                _syncFromDrive();
+              }
+              _tabController.animateTo(0);
+            },
+          ),
+        ],
       ),
       floatingActionButton: ListenableBuilder(
         listenable: _tabController,

@@ -32,9 +32,20 @@ class _NodeListScreenState extends State<NodeListScreen> {
     if (_isWindows) {
       await _localService.updateProject(widget.project);
     } else if (widget.workspace != null) {
-      await _syncService.saveProject(
-          widget.workspace!, 'android', widget.project);
+      final result = await _syncService.saveProject(
+          widget.workspace!, SyncService.workspaceType, widget.project);
+      if (result == SaveResult.conflict && mounted) {
+        // 編集内容は端末に保存済み。上書きしなかったことだけ伝える。
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('このプロジェクトは別の端末で更新されています。'
+                '上書きを避けたため、変更は端末内にのみ保存しました。'),
+            duration: Duration(seconds: 6),
+          ),
+        );
+      }
     }
+    if (!mounted) return;
     setState(() => _saving = false);
   }
 

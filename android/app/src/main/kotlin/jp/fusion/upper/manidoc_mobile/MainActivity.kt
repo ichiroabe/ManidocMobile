@@ -37,6 +37,7 @@ class MainActivity : FlutterActivity() {
             "listChildren" -> onIo(result) {
                 listChildren(call.str("tree"), call.strOrNull("doc"))
             }
+            "stat" -> onIo(result) { stat(call.str("tree"), call.str("doc")) }
             "readBytes" -> onIo(result) {
                 readBytes(call.str("tree"), call.str("doc"))
             }
@@ -173,6 +174,25 @@ class MainActivity : FlutterActivity() {
         }
         return out
     }
+
+    /// 1件分のメタ情報。上書き前に「他所で更新されていないか」を見るのに使う。
+    private fun stat(tree: String, doc: String): Map<String, Any?>? =
+        contentResolver.query(
+            docUri(tree, doc),
+            arrayOf(
+                DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+                DocumentsContract.Document.COLUMN_SIZE,
+                DocumentsContract.Document.COLUMN_LAST_MODIFIED
+            ),
+            null, null, null
+        )?.use { c ->
+            if (!c.moveToFirst()) return@use null
+            mapOf(
+                "name" to c.getString(0),
+                "size" to if (c.isNull(1)) null else c.getLong(1),
+                "modified" to if (c.isNull(2)) null else c.getLong(2)
+            )
+        }
 
     private fun readBytes(tree: String, doc: String): ByteArray? =
         contentResolver.openInputStream(docUri(tree, doc))?.use { it.readBytes() }

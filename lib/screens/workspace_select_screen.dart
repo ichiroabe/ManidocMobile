@@ -184,6 +184,20 @@ class _WorkspaceSelectScreenState extends State<WorkspaceSelectScreen> {
                         icon: const Icon(Icons.add),
                         label: const Text('追加する'),
                       ),
+                      if (!_isWindows) ...[
+                        const SizedBox(height: 16),
+                        Padding(
+                          padding:
+                              const EdgeInsets.symmetric(horizontal: 32),
+                          child: Text(
+                            'Google ドライブでも端末内でも構いません。'
+                            '新しく始める場合は、選択画面の「新規フォルダを作成」で'
+                            'フォルダを作ってから選んでください。',
+                            textAlign: TextAlign.center,
+                            style: Theme.of(context).textTheme.bodySmall,
+                          ),
+                        ),
+                      ],
                     ],
                   ),
                 )

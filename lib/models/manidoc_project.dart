@@ -25,6 +25,10 @@ class ManidocProject {
   // オフラインキャッシュ用（JSONに保存しない）
   bool isDirty;
 
+  /// 読み込んだ時点でのワークスペース側ファイルの更新時刻（JSONに保存しない）。
+  /// 上書き保存の直前にこれと現物を比べ、他所で書き換わっていたら衝突とみなす。
+  DateTime? remoteModifiedAt;
+
   ManidocProject({
     required this.id,
     required this.name,

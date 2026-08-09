@@ -95,6 +95,7 @@ class DriveService {
       project.driveFolderId = folderId;
       project.isReadOnly = readOnly;
       project.hasProjectFolder = hasProjectFolder;
+      project.remoteModifiedAt = file.modifiedTime;
       return project;
     } catch (_) {
       return null;
@@ -136,6 +137,17 @@ class DriveService {
     return fileId;
   }
 
+  /// ワークスペース側のファイルの現在の更新時刻。存在しなければ null。
+  Future<DateTime?> remoteModifiedAt(String fileId) async {
+    final tree = _tree;
+    if (tree == null) return null;
+    try {
+      return (await _saf.stat(tree, fileId))?.modified;
+    } catch (_) {
+      return null;
+    }
+  }
+
   // プロジェクトを上書き保存
   Future<bool> updateProject(ManidocProject project) async {
     final tree = _tree;
@@ -145,7 +157,13 @@ class DriveService {
       project.lastModifiedAt = DateTime.now();
       final bytes =
           Uint8List.fromList(utf8.encode(jsonEncode(project.toJson())));
-      return await _saf.writeBytes(tree, project.driveFileId!, bytes);
+      final ok = await _saf.writeBytes(tree, project.driveFileId!, bytes);
+      if (ok) {
+        // 次回の衝突判定の基準を、いま書いた結果に更新する
+        project.remoteModifiedAt =
+            await remoteModifiedAt(project.driveFileId!);
+      }
+      return ok;
     } catch (_) {
       return false;
     }

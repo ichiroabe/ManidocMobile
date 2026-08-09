@@ -114,7 +114,7 @@ class _NodeEditorScreenState extends State<NodeEditorScreen> {
 
         // キャッシュを優先で読み込み
         if (widget.workspace != null) {
-          final type = widget.project.isReadOnly ? 'windows' : 'android';
+          const type = SyncService.workspaceType;
           final cached = await _syncService.loadCachedImage(
             widget.workspace!, type, widget.project.id, fileName);
           if (cached != null && mounted) {
@@ -144,7 +144,7 @@ class _NodeEditorScreenState extends State<NodeEditorScreen> {
           setState(() => _imageBytes = uint8bytes);
           // ダウンロードした画像をキャッシュに保存
           if (widget.workspace != null) {
-            final type = widget.project.isReadOnly ? 'windows' : 'android';
+            const type = SyncService.workspaceType;
             await _syncService.cacheImage(
               widget.workspace!, type, widget.project.id, fileName, uint8bytes);
           }
@@ -727,7 +727,7 @@ class _ImageBottomSheetState extends State<_ImageBottomSheet> {
 
       // キャッシュに保存（オンライン・オフライン共通）
       if (widget.workspace != null) {
-        final type = widget.project.isReadOnly ? 'windows' : 'android';
+        const type = SyncService.workspaceType;
         await _syncService.cacheImage(
           widget.workspace!, type, widget.project.id, fileName, bytes);
       }
