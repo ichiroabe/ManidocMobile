@@ -4,6 +4,13 @@ import '../models/manidoc_project.dart';
 
 /// Windows向け: ローカルフォルダでManidocプロジェクトを読み書きするサービス
 class LocalStorageService {
+  /// ワークスペース直下に置かれる、プロジェクトではないJSON。
+  /// project.colors.json はデスクトップ版のタイル色のミラー。
+  static const _reservedJsonNames = {
+    'workspace.settings.json',
+    'project.colors.json',
+  };
+
   /// フォルダ内のプロジェクトJSON一覧を返す
   /// Manidoc形式: フォルダ直下に {UUID}.json + {UUID}/ サブフォルダ
   Future<List<LocalProjectInfo>> listProjectFiles(String folderPath) async {
@@ -14,7 +21,7 @@ class LocalStorageService {
     await for (final entity in dir.list()) {
       if (entity is File && entity.path.endsWith('.json')) {
         final name = entity.uri.pathSegments.last;
-        if (name == 'workspace.settings.json') continue;
+        if (_reservedJsonNames.contains(name)) continue;
         final baseName = name.replaceAll('.json', '');
         final projDir = Directory('${dir.path}/$baseName');
         results.add(LocalProjectInfo(
@@ -36,6 +43,8 @@ class LocalStorageService {
       if (!await file.exists()) return null;
       final jsonStr = await file.readAsString(encoding: utf8);
       final json = jsonDecode(jsonStr) as Map<String, dynamic>;
+      // プロジェクト以外のJSONは開かない(開いて保存すると元ファイルを壊すため)
+      if (!ManidocProject.looksLikeProject(json)) return null;
       final project = ManidocProject.fromJson(json);
       project.localFilePath = filePath;
       project.isReadOnly = readOnly;

@@ -19,6 +19,13 @@ class DriveService {
 
   static const _jsonMime = 'application/json';
 
+  /// ワークスペース直下に置かれる、プロジェクトではないJSON。
+  /// project.colors.json はデスクトップ版のタイル色のミラー。
+  static const _reservedJsonNames = {
+    'workspace.settings.json',
+    'project.colors.json',
+  };
+
   String? get _tree => currentTree;
 
   /// フォルダ内のプロジェクトJSON一覧（直下 + UUIDサブフォルダ内）
@@ -37,11 +44,12 @@ class DriveService {
         await _saf.listChildren(tree, doc: folderId, refresh: true);
 
     // 直下のJSON（旧形式: プロジェクト名.json）
+    // 設定やタイル色ミラーなど、プロジェクトではないJSONは除く
     final direct = children
         .where((e) =>
             !e.isDir &&
             e.name.endsWith('.json') &&
-            e.name != 'workspace.settings.json')
+            !_reservedJsonNames.contains(e.name))
         .toList()
       ..sort((a, b) => a.name.compareTo(b.name));
 
@@ -93,6 +101,9 @@ class DriveService {
       final bytes = await _saf.readBytes(tree, file.id);
       if (bytes == null) return null;
       final json = jsonDecode(utf8.decode(bytes)) as Map<String, dynamic>;
+      // プロジェクト以外のJSONを開くと、名前なし・0ノードのカードになってしまう。
+      // さらにそのまま保存すると元のファイルを上書きして壊すため、ここで弾く。
+      if (!ManidocProject.looksLikeProject(json)) return null;
 
       final project = ManidocProject.fromJson(json);
       project.driveFileId = file.id;

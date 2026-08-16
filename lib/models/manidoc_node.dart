@@ -1,6 +1,17 @@
 import 'package:uuid/uuid.dart';
 
 class ManidocNode {
+  /// このクラスが明示的に扱うJSONキー。これ以外は [extra] へ退避して往復させる。
+  static const _knownKeys = {
+    'id',
+    'title',
+    'comment',
+    'article',
+    'imagePath',
+    'aiPrompt',
+    'children',
+  };
+
   String id;
   String title;
   String comment;
@@ -8,6 +19,10 @@ class ManidocNode {
   String imagePath;
   String aiPrompt;
   List<ManidocNode> children;
+
+  /// デスクトップ版が付ける未知フィールド(ノード別の読み上げ話者 titleSpeaker など)。
+  /// このアプリでは使わないが、保存時に落とさないようそのまま書き戻す。
+  final Map<String, dynamic> extra;
 
   ManidocNode({
     required this.id,
@@ -17,7 +32,9 @@ class ManidocNode {
     this.imagePath = '',
     this.aiPrompt = '',
     List<ManidocNode>? children,
-  }) : children = children ?? [];
+    Map<String, dynamic>? extra,
+  })  : children = children ?? [],
+        extra = extra ?? {};
 
   factory ManidocNode.create(String title) => ManidocNode(
         id: const Uuid().v4(),
@@ -35,9 +52,13 @@ class ManidocNode {
                 ?.map((e) => ManidocNode.fromJson(e as Map<String, dynamic>))
                 .toList() ??
             [],
+        extra: Map<String, dynamic>.from(json)
+          ..removeWhere((key, _) => _knownKeys.contains(key)),
       );
 
+  // 未知フィールドを先に展開し、既知フィールドで上書きする
   Map<String, dynamic> toJson() => {
+        ...extra,
         'id': id,
         'title': title,
         'comment': comment,
