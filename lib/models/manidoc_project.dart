@@ -2,6 +2,20 @@ import 'package:uuid/uuid.dart';
 import 'manidoc_node.dart';
 
 class ManidocProject {
+  /// このクラスが明示的に扱うJSONキー。これ以外は [extra] へ退避して往復させる。
+  static const _knownKeys = {
+    'id',
+    'name',
+    'createdAt',
+    'lastModifiedAt',
+    'description',
+    'lastSelectedNodeId',
+    'sortOrder',
+    'themeCssFileName',
+    'tag',
+    'rootNodes',
+  };
+
   String id;
   String name;
   DateTime createdAt;
@@ -12,6 +26,10 @@ class ManidocProject {
   String themeCssFileName;
   String tag;
   List<ManidocNode> rootNodes;
+
+  /// デスクトップ版が付ける未知フィールド(タイル色 cardForeColor / cardBackColor など)。
+  /// このアプリでは使わないが、保存時に落とさないようそのまま書き戻す。
+  final Map<String, dynamic> extra;
 
   // Drive メタデータ（JSONに保存しない）
   String? driveFileId;
@@ -40,6 +58,7 @@ class ManidocProject {
     this.themeCssFileName = '',
     this.tag = '',
     List<ManidocNode>? rootNodes,
+    Map<String, dynamic>? extra,
     this.driveFileId,
     this.driveFolderId,
     this.isReadOnly = false,
@@ -47,7 +66,8 @@ class ManidocProject {
     this.isDirty = false,
   })  : createdAt = createdAt ?? DateTime.now(),
         lastModifiedAt = lastModifiedAt ?? DateTime.now(),
-        rootNodes = rootNodes ?? [];
+        rootNodes = rootNodes ?? [],
+        extra = extra ?? {};
 
   factory ManidocProject.create(String name) => ManidocProject(
         id: const Uuid().v4(),
@@ -73,9 +93,19 @@ class ManidocProject {
                 ?.map((e) => ManidocNode.fromJson(e as Map<String, dynamic>))
                 .toList() ??
             [],
+        extra: Map<String, dynamic>.from(json)
+          ..removeWhere((key, _) => _knownKeys.contains(key)),
       );
 
+  /// プロジェクトJSONかどうか(rootNodes を持つか)。
+  /// ワークスペース直下には project.colors.json のような別用途のJSONも置かれるため、
+  /// これで弾かないと名前なし・0ノードのプロジェクトとして一覧に出てしまう。
+  static bool looksLikeProject(Map<String, dynamic> json) =>
+      json.containsKey('rootNodes');
+
+  // 未知フィールドを先に展開し、既知フィールドで上書きする
   Map<String, dynamic> toJson() => {
+        ...extra,
         'id': id,
         'name': name,
         'createdAt': createdAt.toIso8601String(),
