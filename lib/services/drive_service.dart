@@ -184,6 +184,42 @@ class DriveService {
     }
   }
 
+  /// ワークスペース直下の任意テキストファイルを読む（無ければ null）。
+  /// workspace.settings.json などプロジェクト以外のファイルに使う。
+  Future<String?> readWorkspaceText(String folderId, String name) async {
+    final id = await findFileIdByName(folderId, name);
+    if (id == null) return null;
+    final bytes = await downloadFileBytes(id);
+    if (bytes == null) return null;
+    try {
+      return utf8.decode(bytes);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// ワークスペース直下の任意テキストファイルを書く（無ければ作成、あれば上書き）。
+  Future<bool> writeWorkspaceText(
+      String folderId, String name, String content) async {
+    final tree = _tree;
+    if (tree == null) return false;
+    final bytes = Uint8List.fromList(utf8.encode(content));
+    try {
+      final id = await findFileIdByName(folderId, name);
+      if (id != null) return await _saf.writeBytes(tree, id, bytes);
+      final newId = await _saf.createFile(
+        tree,
+        parent: folderId,
+        name: name,
+        mime: _jsonMime,
+        bytes: bytes,
+      );
+      return newId != null;
+    } catch (_) {
+      return false;
+    }
+  }
+
   // ファイルを削除
   Future<void> deleteFile(String fileId) async {
     final tree = _tree;

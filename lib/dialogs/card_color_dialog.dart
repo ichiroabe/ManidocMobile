@@ -27,6 +27,19 @@ Future<CardColorResult?> showCardColorDialog(
   );
 }
 
+/// 単色を選ぶダイアログ（タグ色などに使う）。
+/// 戻り値: '#rrggbb'、空文字は「色なし」、キャンセルは null。
+Future<String?> showSingleColorDialog(
+  BuildContext context, {
+  String initial = '',
+  String title = '色を選ぶ',
+}) {
+  return showDialog<String>(
+    context: context,
+    builder: (context) => _SingleColorDialog(initial: initial, title: title),
+  );
+}
+
 /// 選択用のプリセット色。よく使う色相 + 無彩色。
 const List<String> _palette = [
   '#e53935', '#d81b60', '#8e24aa', '#5e35b1',
@@ -36,6 +49,148 @@ const List<String> _palette = [
   '#6d4c41', '#757575', '#546e7a', '#000000',
   '#455a64', '#90a4ae', '#bdbdbd', '#ffffff',
 ];
+
+class _SingleColorDialog extends StatefulWidget {
+  final String initial;
+  final String title;
+  const _SingleColorDialog({required this.initial, required this.title});
+
+  @override
+  State<_SingleColorDialog> createState() => _SingleColorDialogState();
+}
+
+class _SingleColorDialogState extends State<_SingleColorDialog> {
+  late String _hex = widget.initial;
+  late final TextEditingController _controller =
+      TextEditingController(text: _hex);
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _set(String hex) {
+    setState(() {
+      _hex = hex;
+      _controller.text = hex;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final preview = colorFromHex(_hex) ?? scheme.surfaceContainerHigh;
+    return AlertDialog(
+      title: Text(widget.title),
+      content: SizedBox(
+        width: 380,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: double.infinity,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: preview,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: scheme.outlineVariant),
+                ),
+                alignment: Alignment.center,
+                child: Text(_hex.isEmpty ? '色なし' : _hex,
+                    style: TextStyle(
+                        color: colorFromHex(_hex) != null
+                            ? contrastForegroundFor(preview)
+                            : scheme.onSurface)),
+              ),
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  for (final hex in _palette)
+                    _Swatch(
+                      hex: hex,
+                      selected: _hex.toLowerCase() == hex.toLowerCase(),
+                      onTap: () => _set(hex),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _controller,
+                decoration: const InputDecoration(
+                  labelText: 'Hex (#rrggbb)',
+                  border: OutlineInputBorder(),
+                  isDense: true,
+                ),
+                inputFormatters: [
+                  FilteringTextInputFormatter.allow(RegExp(r'[#0-9a-fA-F]')),
+                  LengthLimitingTextInputFormatter(7),
+                ],
+                onChanged: (v) {
+                  final c = colorFromHex(v);
+                  if (c != null) setState(() => _hex = hexFromColor(c));
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('キャンセル'),
+        ),
+        TextButton(
+          onPressed: () => Navigator.pop(context, ''),
+          child: const Text('色なし'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.pop(context, _hex),
+          child: const Text('適用'),
+        ),
+      ],
+    );
+  }
+}
+
+/// パレットの丸いスウォッチ（単色ダイアログ用）。
+class _Swatch extends StatelessWidget {
+  final String hex;
+  final bool selected;
+  final VoidCallback onTap;
+  const _Swatch(
+      {required this.hex, required this.selected, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final color = colorFromHex(hex) ?? Colors.transparent;
+    return Tooltip(
+      message: hex,
+      child: InkWell(
+        onTap: onTap,
+        customBorder: const CircleBorder(),
+        child: Container(
+          width: 30,
+          height: 30,
+          decoration: BoxDecoration(
+            color: color,
+            shape: BoxShape.circle,
+            border: Border.all(
+              color: selected
+                  ? Theme.of(context).colorScheme.primary
+                  : Theme.of(context).colorScheme.outlineVariant,
+              width: selected ? 3 : 1,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
 
 class _CardColorDialog extends StatefulWidget {
   final String initialFore;

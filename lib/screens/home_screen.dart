@@ -3,12 +3,16 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../dialogs/card_color_dialog.dart';
 import '../dialogs/tag_dialog.dart';
+import '../dialogs/tag_manager_dialog.dart';
 import '../models/manidoc_project.dart';
+import '../models/tag_definition.dart';
 import '../models/workspace_info.dart';
+import '../services/color_utils.dart';
 import '../services/drive_service.dart';
 import '../services/local_cache_service.dart';
 import '../services/local_storage_service.dart';
 import '../services/sync_service.dart';
+import '../services/workspace_settings_service.dart';
 import 'ai_agent_screen.dart';
 import 'node_list_screen.dart';
 import 'settings_screen.dart';
@@ -38,7 +42,18 @@ class _HomeScreenState extends State<HomeScreen>
   final _localService = LocalStorageService();
   final _syncService = SyncService();
   final _cacheService = LocalCacheService();
+  final _settingsService = WorkspaceSettingsService();
   late final TabController _tabController;
+
+  /// ワークスペースのタグ定義（名前 + 色）。workspace.settings.json から読む。
+  List<TagDefinition> _workspaceTags = [];
+
+  // ── 複数選択（一括色・一括タグ・色コピー/貼り付け） ──
+  bool _selectionMode = false;
+  final Set<String> _selectedIds = {};
+  String? _copiedFore;
+  String? _copiedBack;
+  bool get _hasCopiedColor => _copiedFore != null || _copiedBack != null;
 
   bool get _isWindows => Platform.isWindows;
 
@@ -75,6 +90,30 @@ class _HomeScreenState extends State<HomeScreen>
   void dispose() {
     _tabController.dispose();
     super.dispose();
+  }
+
+  // ── タグ定義（ワークスペース設定） ──
+  Future<void> _loadTags() async {
+    try {
+      final tags = await _settingsService.loadTags(widget.workspace, _isWindows);
+      if (mounted) setState(() => _workspaceTags = tags);
+    } catch (_) {
+      // タグが読めなくても一覧表示は続ける
+    }
+  }
+
+  TagDefinition? _tagDef(String name) {
+    for (final t in _workspaceTags) {
+      if (t.name == name) return t;
+    }
+    return null;
+  }
+
+  /// タグ名 → 色（定義が無い・色なしなら null）
+  Color? _tagColor(String name) {
+    final def = _tagDef(name);
+    if (def == null || def.color.isEmpty) return null;
+    return colorFromHex(def.color);
   }
 
   // ── ソート設定 ──
@@ -148,6 +187,9 @@ class _HomeScreenState extends State<HomeScreen>
         _loading = false;
       }
     });
+
+    // タグ定義も読む（一覧と並行）
+    _loadTags();
 
     // 2. バックグラウンドでワークスペースから同期
     await _syncFromDrive();
@@ -233,6 +275,7 @@ class _HomeScreenState extends State<HomeScreen>
       _localProjects = projects;
       _loadingLocal = false;
     });
+    _loadTags();
   }
 
   Future<void> _createProject() async {
@@ -404,16 +447,81 @@ class _HomeScreenState extends State<HomeScreen>
     }
   }
 
-  /// 🏷 タグを編集する（openManidoc 準拠）。
+  List<ManidocProject> get _currentProjects =>
+      _isWindows ? _localProjects : _projects;
+
+  /// タグ候補: 定義済みタグ + 実際に使われているタグ（昇順・重複なし）
+  List<String> _allTagNames() {
+    final names = <String>{
+      for (final t in _workspaceTags)
+        if (t.name.trim().isNotEmpty) t.name.trim(),
+      ..._collectTags(_currentProjects),
+    };
+    final list = names.toList()..sort();
+    return list;
+  }
+
+  /// タグの色をプロジェクトのタイルへ適用する。背景色をタグ色にし、
+  /// 文字色は読みやすい方（白/黒）を自動で入れる。色なしなら既定へ戻す。
+  void _applyTagColorToProject(ManidocProject project, String tagColorHex) {
+    final bg = colorFromHex(tagColorHex);
+    if (bg == null) {
+      project.cardBackColorHex = '';
+      project.cardForeColorHex = '';
+    } else {
+      project.cardBackColorHex = tagColorHex;
+      project.cardForeColorHex = hexFromColor(contrastForegroundFor(bg));
+    }
+  }
+
+  /// 複数プロジェクトを保存する（1件ずつ保存し、最後に一度だけ再読込）。
+  Future<void> _persistMany(List<ManidocProject> projects) async {
+    if (projects.isEmpty) return;
+    var conflict = false;
+    for (final project in projects) {
+      if (_isWindows) {
+        await _localService.updateProject(project);
+      } else {
+        final result = await _syncService.saveProject(
+            widget.workspace, SyncService.workspaceType, project);
+        if (result == SaveResult.conflict) conflict = true;
+      }
+    }
+    if (!mounted) return;
+    if (conflict) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('一部のプロジェクトは別の端末で更新されていたため、'
+              '変更は端末内にのみ保存しました。'),
+          duration: Duration(seconds: 6),
+        ),
+      );
+    }
+    if (_isWindows) {
+      _loadLocal();
+    } else {
+      setState(() {});
+    }
+  }
+
+  /// 未定義のタグ名なら定義に追加して settings.json に保存する（openManidoc 準拠）。
+  Future<void> _ensureTagRegistered(String name) async {
+    final n = name.trim();
+    if (n.isEmpty || _tagDef(n) != null) return;
+    final updated = [..._workspaceTags, TagDefinition(name: n)];
+    await _settingsService.saveTags(widget.workspace, _isWindows, updated);
+    if (mounted) setState(() => _workspaceTags = updated);
+  }
+
+  /// 🏷 タグを編集する（openManidoc 準拠）。タグに色があればタイルにも反映する。
   Future<void> _editTag(ManidocProject project) async {
-    final projects = _isWindows ? _localProjects : _projects;
-    final tag = await showTagDialog(
-      context,
-      project.tag,
-      _collectTags(projects),
-    );
+    final tag = await showTagDialog(context, project.tag, _allTagNames());
     if (!mounted || tag == null || tag == project.tag) return;
     project.tag = tag;
+    // タグに色が定義されていればタイルへ適用する
+    final color = _tagColor(tag);
+    if (color != null) _applyTagColorToProject(project, hexFromColor(color));
+    await _ensureTagRegistered(tag);
     await _persistEdit(project);
   }
 
@@ -432,6 +540,117 @@ class _HomeScreenState extends State<HomeScreen>
     project.cardForeColorHex = result.fore;
     project.cardBackColorHex = result.back;
     await _persistEdit(project);
+  }
+
+  /// 🏷 タグ管理（追加/改名/色設定/削除）。保存すると各タグの色を、
+  /// そのタグが付いた全プロジェクトのタイルへ即反映する。
+  Future<void> _openTagManager() async {
+    final edited = await showTagManagerDialog(context, _workspaceTags);
+    if (!mounted || edited == null) return;
+
+    // まず設定を保存
+    await _settingsService.saveTags(widget.workspace, _isWindows, edited);
+    if (!mounted) return;
+    setState(() => _workspaceTags = edited);
+
+    // 各タグの色を、そのタグが付いた全プロジェクトへ反映する
+    final colorByTag = {for (final t in edited) t.name: t.color};
+    final changed = <ManidocProject>[];
+    for (final p in _currentProjects) {
+      if (p.tag.isEmpty) continue;
+      final hex = colorByTag[p.tag];
+      if (hex == null || hex.isEmpty) continue;
+      final fore = hexFromColor(contrastForegroundFor(colorFromHex(hex)!));
+      if (p.cardBackColorHex == hex && p.cardForeColorHex == fore) continue;
+      _applyTagColorToProject(p, hex);
+      changed.add(p);
+    }
+    await _persistMany(changed);
+  }
+
+  // ── 色のコピー / 貼り付け ──
+  void _copyColor(ManidocProject project) {
+    setState(() {
+      _copiedFore = project.cardForeColorHex;
+      _copiedBack = project.cardBackColorHex;
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('色をコピーしました'), duration: Duration(seconds: 2)),
+    );
+  }
+
+  Future<void> _pasteColor(ManidocProject project) async {
+    if (!_hasCopiedColor) return;
+    // 選択モードで対象自身も選択中なら、選択した全件へ適用する
+    final targets = _selectionMode && _selectedIds.contains(project.id)
+        ? _selectedProjects
+        : [project];
+    for (final p in targets) {
+      p.cardForeColorHex = _copiedFore ?? '';
+      p.cardBackColorHex = _copiedBack ?? '';
+    }
+    await _persistMany(targets);
+  }
+
+  // ── 複数選択 ──
+  List<ManidocProject> get _selectedProjects =>
+      _currentProjects.where((p) => _selectedIds.contains(p.id)).toList();
+
+  void _enterSelection(ManidocProject project) {
+    setState(() {
+      _selectionMode = true;
+      _selectedIds
+        ..clear()
+        ..add(project.id);
+    });
+  }
+
+  void _toggleSelect(ManidocProject project) {
+    setState(() {
+      if (!_selectedIds.remove(project.id)) _selectedIds.add(project.id);
+    });
+  }
+
+  void _exitSelection() {
+    setState(() {
+      _selectionMode = false;
+      _selectedIds.clear();
+    });
+  }
+
+  /// 選択中のプロジェクトへ色を一括設定する。
+  Future<void> _bulkColor() async {
+    final targets = _selectedProjects;
+    if (targets.isEmpty) return;
+    final first = targets.first;
+    final result = await showCardColorDialog(
+      context,
+      initialFore: first.cardForeColorHex,
+      initialBack: first.cardBackColorHex,
+    );
+    if (!mounted || result == null) return;
+    for (final p in targets) {
+      p.cardForeColorHex = result.fore;
+      p.cardBackColorHex = result.back;
+    }
+    await _persistMany(targets);
+    if (mounted) _exitSelection();
+  }
+
+  /// 選択中のプロジェクトへタグを一括設定する。タグ色があればタイルへも反映。
+  Future<void> _bulkTag() async {
+    final targets = _selectedProjects;
+    if (targets.isEmpty) return;
+    final tag = await showTagDialog(context, '', _allTagNames());
+    if (!mounted || tag == null) return;
+    final color = _tagColor(tag);
+    for (final p in targets) {
+      p.tag = tag;
+      if (color != null) _applyTagColorToProject(p, hexFromColor(color));
+    }
+    await _ensureTagRegistered(tag);
+    await _persistMany(targets);
+    if (mounted) _exitSelection();
   }
 
   Future<void> _deleteProject(ManidocProject project) async {
@@ -676,25 +895,34 @@ class _HomeScreenState extends State<HomeScreen>
           final subtitleColor =
               (foreColor ?? Theme.of(context).colorScheme.onSurfaceVariant)
                   .withValues(alpha: 0.75);
+          final selected = _selectedIds.contains(project.id);
           return ListTile(
+            selected: selected,
+            selectedTileColor:
+                Theme.of(context).colorScheme.primary.withValues(alpha: 0.18),
             tileColor: backColor,
-            leading: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(Icons.folder_outlined, color: iconColor),
-                if (project.isDirty) ...[
-                  const SizedBox(width: 4),
-                  Container(
-                    width: 8,
-                    height: 8,
-                    decoration: const BoxDecoration(
-                      color: Colors.orange,
-                      shape: BoxShape.circle,
-                    ),
+            leading: _selectionMode
+                ? Checkbox(
+                    value: selected,
+                    onChanged: readOnly ? null : (_) => _toggleSelect(project),
+                  )
+                : Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.folder_outlined, color: iconColor),
+                      if (project.isDirty) ...[
+                        const SizedBox(width: 4),
+                        Container(
+                          width: 8,
+                          height: 8,
+                          decoration: const BoxDecoration(
+                            color: Colors.orange,
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                      ],
+                    ],
                   ),
-                ],
-              ],
-            ),
             title: Text(
               project.name,
               style: foreColor != null ? TextStyle(color: foreColor) : null,
@@ -716,60 +944,92 @@ class _HomeScreenState extends State<HomeScreen>
             ),
             trailing: readOnly
                 ? Icon(Icons.lock_outline, size: 16, color: iconColor)
-                : PopupMenuButton<String>(
-                    icon: Icon(Icons.more_vert, color: iconColor),
-                    onSelected: (value) {
-                      if (value == 'rename') _renameProject(project);
-                      if (value == 'tag') _editTag(project);
-                      if (value == 'color') _editCardColor(project);
-                      if (value == 'delete') _deleteProject(project);
-                    },
-                    itemBuilder: (_) => [
-                      const PopupMenuItem(
-                        value: 'rename',
-                        child: ListTile(
-                          leading: Icon(Icons.edit_outlined),
-                          title: Text('名前を変更'),
-                        ),
+                : _selectionMode
+                    ? null
+                    : PopupMenuButton<String>(
+                        icon: Icon(Icons.more_vert, color: iconColor),
+                        onSelected: (value) {
+                          if (value == 'rename') _renameProject(project);
+                          if (value == 'tag') _editTag(project);
+                          if (value == 'color') _editCardColor(project);
+                          if (value == 'copyColor') _copyColor(project);
+                          if (value == 'pasteColor') _pasteColor(project);
+                          if (value == 'select') _enterSelection(project);
+                          if (value == 'delete') _deleteProject(project);
+                        },
+                        itemBuilder: (_) => [
+                          const PopupMenuItem(
+                            value: 'rename',
+                            child: ListTile(
+                              leading: Icon(Icons.edit_outlined),
+                              title: Text('名前を変更'),
+                            ),
+                          ),
+                          const PopupMenuItem(
+                            value: 'tag',
+                            child: ListTile(
+                              leading: Icon(Icons.local_offer_outlined),
+                              title: Text('タグを編集'),
+                            ),
+                          ),
+                          const PopupMenuItem(
+                            value: 'color',
+                            child: ListTile(
+                              leading: Icon(Icons.palette_outlined),
+                              title: Text('色を変更'),
+                            ),
+                          ),
+                          const PopupMenuItem(
+                            value: 'copyColor',
+                            child: ListTile(
+                              leading: Icon(Icons.copy_outlined),
+                              title: Text('色をコピー'),
+                            ),
+                          ),
+                          PopupMenuItem(
+                            value: 'pasteColor',
+                            enabled: _hasCopiedColor,
+                            child: const ListTile(
+                              leading: Icon(Icons.paste_outlined),
+                              title: Text('色を貼り付け'),
+                            ),
+                          ),
+                          const PopupMenuItem(
+                            value: 'select',
+                            child: ListTile(
+                              leading: Icon(Icons.check_box_outlined),
+                              title: Text('選択'),
+                            ),
+                          ),
+                          const PopupMenuItem(
+                            value: 'delete',
+                            child: ListTile(
+                              leading:
+                                  Icon(Icons.delete_outline, color: Colors.red),
+                              title: Text('削除',
+                                  style: TextStyle(color: Colors.red)),
+                            ),
+                          ),
+                        ],
                       ),
-                      const PopupMenuItem(
-                        value: 'tag',
-                        child: ListTile(
-                          leading: Icon(Icons.local_offer_outlined),
-                          title: Text('タグを編集'),
-                        ),
-                      ),
-                      const PopupMenuItem(
-                        value: 'color',
-                        child: ListTile(
-                          leading: Icon(Icons.palette_outlined),
-                          title: Text('色を変更'),
-                        ),
-                      ),
-                      const PopupMenuItem(
-                        value: 'delete',
-                        child: ListTile(
-                          leading:
-                              Icon(Icons.delete_outline, color: Colors.red),
-                          title: Text('削除',
-                              style: TextStyle(color: Colors.red)),
-                        ),
-                      ),
-                    ],
-                  ),
-            onTap: () => _openProject(project),
+            onTap: _selectionMode
+                ? () => _toggleSelect(project)
+                : () => _openProject(project),
+            onLongPress: (readOnly || _selectionMode)
+                ? null
+                : () => _enterSelection(project),
           );
         },
       ),
     );
   }
 
-  /// 🏷 タグのチップ。タイルに色が付いていればその文字色に馴染ませ、
-  /// 無ければテーマ色で表示する。
+  /// 🏷 タグのチップ。タグに色が定義されていればそれを使い、
+  /// 無ければタイルの文字色、さらに無ければテーマ色で表示する。
   Widget _buildTagChip(
       BuildContext context, ManidocProject project, Color? foreColor) {
     final scheme = Theme.of(context).colorScheme;
-    final base = foreColor ?? scheme.primary;
+    final base = _tagColor(project.tag.trim()) ?? foreColor ?? scheme.primary;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
       decoration: BoxDecoration(
@@ -787,6 +1047,89 @@ class _HomeScreenState extends State<HomeScreen>
               project.tag.trim(),
               overflow: TextOverflow.ellipsis,
               style: TextStyle(fontSize: 11, color: base),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 選択モード中の操作バー（件数・全選択・解除・一括色・一括タグ・閉じる）
+  Widget _buildSelectionBar(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final count = _selectedIds.length;
+    return Container(
+      margin: const EdgeInsets.fromLTRB(8, 8, 8, 0),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      decoration: BoxDecoration(
+        color: scheme.primaryContainer,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        children: [
+          IconButton(
+            tooltip: '選択を終了',
+            visualDensity: VisualDensity.compact,
+            icon: const Icon(Icons.close),
+            onPressed: _exitSelection,
+          ),
+          Text('$count 件', style: const TextStyle(fontWeight: FontWeight.bold)),
+          // ボタンが多いと狭い画面で溢れるため、横スクロールできるようにする
+          Expanded(
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              reverse: true,
+              child: Row(
+                children: [
+                  IconButton(
+                    tooltip: '全選択',
+                    visualDensity: VisualDensity.compact,
+                    icon: const Icon(Icons.select_all),
+                    onPressed: () => setState(() {
+                      _selectedIds
+                        ..clear()
+                        ..addAll(_currentProjects.map((p) => p.id));
+                    }),
+                  ),
+                  IconButton(
+                    tooltip: '選択解除',
+                    visualDensity: VisualDensity.compact,
+                    icon: const Icon(Icons.deselect),
+                    onPressed: count == 0
+                        ? null
+                        : () => setState(() => _selectedIds.clear()),
+                  ),
+                  IconButton(
+                    tooltip: '色をまとめて設定',
+                    visualDensity: VisualDensity.compact,
+                    icon: const Icon(Icons.palette_outlined),
+                    onPressed: count == 0 ? null : _bulkColor,
+                  ),
+                  IconButton(
+                    tooltip: 'タグをまとめて設定',
+                    visualDensity: VisualDensity.compact,
+                    icon: const Icon(Icons.local_offer_outlined),
+                    onPressed: count == 0 ? null : _bulkTag,
+                  ),
+                  if (_hasCopiedColor)
+                    IconButton(
+                      tooltip: '色を貼り付け',
+                      visualDensity: VisualDensity.compact,
+                      icon: const Icon(Icons.paste_outlined),
+                      onPressed: count == 0
+                          ? null
+                          : () async {
+                              final targets = _selectedProjects;
+                              for (final p in targets) {
+                                p.cardForeColorHex = _copiedFore ?? '';
+                                p.cardBackColorHex = _copiedBack ?? '';
+                              }
+                              await _persistMany(targets);
+                              if (mounted) _exitSelection();
+                            },
+                    ),
+                ],
+              ),
             ),
           ),
         ],
@@ -845,6 +1188,12 @@ class _HomeScreenState extends State<HomeScreen>
           ),
         ),
         actions: [
+          if (!_isWindows || widget.workspace.localPath != null)
+            IconButton(
+              icon: const Icon(Icons.style_outlined),
+              tooltip: 'タグ管理',
+              onPressed: _openTagManager,
+            ),
           _buildSortButton(),
           _buildSyncIndicator(),
           IconButton(
@@ -870,6 +1219,7 @@ class _HomeScreenState extends State<HomeScreen>
             children: [
               // 一覧を出した後も裏で画像などを取り込んでいる間は帯を出す
               if (!_isWindows && !_loading) _buildProgressStrip(),
+              if (_selectionMode) _buildSelectionBar(context),
               Expanded(
                 child: _isWindows
                     ? _buildProjectList(_localProjects, _loadingLocal, false)
@@ -895,7 +1245,7 @@ class _HomeScreenState extends State<HomeScreen>
         builder: (context, _) {
           // プロジェクトタブだけ。AIタブに出すと送信ボタンと重なる。
           // （3タブ時代の index==1 が「Android(読み書き)」タブを指していた名残）
-          final showFab = _tabController.index == 0;
+          final showFab = _tabController.index == 0 && !_selectionMode;
           if (!showFab) return const SizedBox.shrink();
           return FloatingActionButton.extended(
             onPressed: _createProject,

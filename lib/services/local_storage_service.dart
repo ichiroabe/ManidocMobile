@@ -97,6 +97,29 @@ class LocalStorageService {
     }
   }
 
+  /// ワークスペース直下の任意テキストファイルを読む（無ければ null）。
+  Future<String?> readWorkspaceText(String folderPath, String name) async {
+    final file = File('$folderPath${Platform.pathSeparator}$name');
+    if (!await file.exists()) return null;
+    try {
+      return await file.readAsString();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// ワークスペース直下の任意テキストファイルを書く（無ければ作成、あれば上書き）。
+  Future<bool> writeWorkspaceText(
+      String folderPath, String name, String content) async {
+    try {
+      await File('$folderPath${Platform.pathSeparator}$name')
+          .writeAsString(content, encoding: utf8);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
   /// プロジェクトを削除（JSONファイル + プロジェクトフォルダ）
   Future<void> deleteProject(ManidocProject project) async {
     final path = project.localFilePath;
