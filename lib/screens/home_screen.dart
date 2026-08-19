@@ -1,6 +1,8 @@
 import 'dart:io' show Platform;
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../dialogs/card_color_dialog.dart';
+import '../dialogs/tag_dialog.dart';
 import '../models/manidoc_project.dart';
 import '../models/workspace_info.dart';
 import '../services/drive_service.dart';
@@ -18,6 +20,7 @@ enum ProjectSort {
   nameAsc,
   nameDesc,
   createdDesc,
+  tag,
 }
 
 class HomeScreen extends StatefulWidget {
@@ -108,8 +111,28 @@ class _HomeScreenState extends State<HomeScreen>
             (a, b) => b.name.toLowerCase().compareTo(a.name.toLowerCase()));
       case ProjectSort.createdDesc:
         sorted.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+      case ProjectSort.tag:
+        // タグ名の昇順を一次キー（無タグは末尾）、その中は更新日時の新しい順。
+        sorted.sort((a, b) {
+          final ta = a.tag.trim();
+          final tb = b.tag.trim();
+          if (ta.isEmpty != tb.isEmpty) return ta.isEmpty ? 1 : -1;
+          final c = ta.toLowerCase().compareTo(tb.toLowerCase());
+          if (c != 0) return c;
+          return b.lastModifiedAt.compareTo(a.lastModifiedAt);
+        });
     }
     return sorted;
+  }
+
+  /// 一覧に出ているプロジェクトから、使われているタグの一覧を作る（昇順・重複なし）。
+  List<String> _collectTags(List<ManidocProject> projects) {
+    final names = <String>{
+      for (final p in projects)
+        if (p.tag.trim().isNotEmpty) p.tag.trim(),
+    };
+    final list = names.toList()..sort();
+    return list;
   }
 
   // ── キャッシュ優先読み込み（Android） ──
@@ -356,6 +379,59 @@ class _HomeScreenState extends State<HomeScreen>
       }
       setState(() {});
     }
+  }
+
+  /// 変更したプロジェクトを保存する（名前変更・タグ・色の各編集で共通）。
+  Future<void> _persistEdit(ManidocProject project) async {
+    if (_isWindows) {
+      await _localService.updateProject(project);
+      if (!mounted) return;
+      _loadLocal();
+    } else {
+      final result = await _syncService.saveProject(
+          widget.workspace, SyncService.workspaceType, project);
+      if (!mounted) return;
+      if (result == SaveResult.conflict) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('このプロジェクトは別の端末で更新されています。'
+                '上書きを避けたため、変更は端末内にのみ保存しました。'),
+            duration: Duration(seconds: 6),
+          ),
+        );
+      }
+      setState(() {});
+    }
+  }
+
+  /// 🏷 タグを編集する（openManidoc 準拠）。
+  Future<void> _editTag(ManidocProject project) async {
+    final projects = _isWindows ? _localProjects : _projects;
+    final tag = await showTagDialog(
+      context,
+      project.tag,
+      _collectTags(projects),
+    );
+    if (!mounted || tag == null || tag == project.tag) return;
+    project.tag = tag;
+    await _persistEdit(project);
+  }
+
+  /// 🎨 タイルの色（文字色/背景色）を編集する（openManidoc 準拠）。
+  Future<void> _editCardColor(ManidocProject project) async {
+    final result = await showCardColorDialog(
+      context,
+      initialFore: project.cardForeColorHex,
+      initialBack: project.cardBackColorHex,
+    );
+    if (!mounted || result == null) return;
+    if (result.fore == project.cardForeColorHex &&
+        result.back == project.cardBackColorHex) {
+      return;
+    }
+    project.cardForeColorHex = result.fore;
+    project.cardBackColorHex = result.back;
+    await _persistEdit(project);
   }
 
   Future<void> _deleteProject(ManidocProject project) async {
@@ -623,12 +699,20 @@ class _HomeScreenState extends State<HomeScreen>
               project.name,
               style: foreColor != null ? TextStyle(color: foreColor) : null,
             ),
-            subtitle: Text(
-              _formatDate(project.lastModifiedAt),
-              style: Theme.of(context)
-                  .textTheme
-                  .bodySmall
-                  ?.copyWith(color: subtitleColor),
+            subtitle: Row(
+              children: [
+                Text(
+                  _formatDate(project.lastModifiedAt),
+                  style: Theme.of(context)
+                      .textTheme
+                      .bodySmall
+                      ?.copyWith(color: subtitleColor),
+                ),
+                if (project.tag.trim().isNotEmpty) ...[
+                  const SizedBox(width: 8),
+                  Flexible(child: _buildTagChip(context, project, foreColor)),
+                ],
+              ],
             ),
             trailing: readOnly
                 ? Icon(Icons.lock_outline, size: 16, color: iconColor)
@@ -636,6 +720,8 @@ class _HomeScreenState extends State<HomeScreen>
                     icon: Icon(Icons.more_vert, color: iconColor),
                     onSelected: (value) {
                       if (value == 'rename') _renameProject(project);
+                      if (value == 'tag') _editTag(project);
+                      if (value == 'color') _editCardColor(project);
                       if (value == 'delete') _deleteProject(project);
                     },
                     itemBuilder: (_) => [
@@ -644,6 +730,20 @@ class _HomeScreenState extends State<HomeScreen>
                         child: ListTile(
                           leading: Icon(Icons.edit_outlined),
                           title: Text('名前を変更'),
+                        ),
+                      ),
+                      const PopupMenuItem(
+                        value: 'tag',
+                        child: ListTile(
+                          leading: Icon(Icons.local_offer_outlined),
+                          title: Text('タグを編集'),
+                        ),
+                      ),
+                      const PopupMenuItem(
+                        value: 'color',
+                        child: ListTile(
+                          leading: Icon(Icons.palette_outlined),
+                          title: Text('色を変更'),
                         ),
                       ),
                       const PopupMenuItem(
@@ -664,6 +764,36 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
+  /// 🏷 タグのチップ。タイルに色が付いていればその文字色に馴染ませ、
+  /// 無ければテーマ色で表示する。
+  Widget _buildTagChip(
+      BuildContext context, ManidocProject project, Color? foreColor) {
+    final scheme = Theme.of(context).colorScheme;
+    final base = foreColor ?? scheme.primary;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      decoration: BoxDecoration(
+        color: base.withValues(alpha: 0.15),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: base.withValues(alpha: 0.5)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.local_offer, size: 11, color: base),
+          const SizedBox(width: 4),
+          Flexible(
+            child: Text(
+              project.tag.trim(),
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 11, color: base),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildSortButton() {
     const labels = {
       ProjectSort.modifiedDesc: '更新日時（新しい順）',
@@ -671,6 +801,7 @@ class _HomeScreenState extends State<HomeScreen>
       ProjectSort.nameAsc: '名前（昇順）',
       ProjectSort.nameDesc: '名前（降順）',
       ProjectSort.createdDesc: '作成日時（新しい順）',
+      ProjectSort.tag: 'タグ',
     };
     return PopupMenuButton<ProjectSort>(
       icon: const Icon(Icons.sort),

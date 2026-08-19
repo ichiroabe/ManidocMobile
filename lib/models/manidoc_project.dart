@@ -104,6 +104,24 @@ class ManidocProject {
   /// デスクトップ版が付けるタイルの文字色（cardForeColor）。無ければ null。
   Color? get cardForeColor => _parseColor(extra['cardForeColor']);
 
+  /// タイル色の '#rrggbb' 文字列。未設定なら空文字。編集ダイアログから読み書きする。
+  /// デスクトップ版と同じく extra 経由で保存し、空文字ならキーごと落とす
+  /// （本家 Manidoc が読むJSONを不要に汚さない）。
+  String get cardBackColorHex => (extra['cardBackColor'] as String?) ?? '';
+  set cardBackColorHex(String hex) => _setColorHex('cardBackColor', hex);
+
+  String get cardForeColorHex => (extra['cardForeColor'] as String?) ?? '';
+  set cardForeColorHex(String hex) => _setColorHex('cardForeColor', hex);
+
+  void _setColorHex(String key, String hex) {
+    final v = hex.trim();
+    if (v.isEmpty) {
+      extra.remove(key);
+    } else {
+      extra[key] = v;
+    }
+  }
+
   /// "#rrggbb" / "#aarrggbb"（先頭の # は任意）を [Color] に変換する。
   /// 形式が想定外なら null を返して既定色にフォールバックさせる。
   static Color? _parseColor(dynamic value) {

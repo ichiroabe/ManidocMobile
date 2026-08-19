@@ -85,6 +85,24 @@ void main() {
     expect(project.cardForeColor, isNull);
   });
 
+  test('タイル色の hex を編集すると JSON に往復し、空文字でキーごと落ちる', () {
+    final project = ManidocProject.create('色を編集');
+    // 設定するとキーが増え、Color としても読める
+    project.cardBackColorHex = '#1e88e5';
+    project.cardForeColorHex = '#ffffff';
+    expect(project.cardBackColorHex, '#1e88e5');
+    expect(project.cardBackColor, const Color(0xFF1E88E5));
+    final saved = project.toJson();
+    expect(saved['cardBackColor'], '#1e88e5');
+    expect(saved['cardForeColor'], '#ffffff');
+
+    // 空文字にするとキーごと消える（本家 Manidoc が読むJSONを汚さない）
+    project.cardBackColorHex = '';
+    expect(project.cardBackColorHex, '');
+    expect(project.cardBackColor, isNull);
+    expect(project.toJson().containsKey('cardBackColor'), false);
+  });
+
   test('壊れたタイル色は null として扱う', () {
     final project = ManidocProject.fromJson({
       'name': 'こわれた色',
