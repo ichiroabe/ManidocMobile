@@ -591,11 +591,21 @@ class _HomeScreenState extends State<HomeScreen>
         itemCount: sorted.length,
         itemBuilder: (context, i) {
           final project = sorted[i];
+          // デスクトップ版のタイル色に合わせて行の色を決める。
+          // 無ければ従来どおりテーマの既定色にフォールバックする。
+          final backColor = project.cardBackColor;
+          final foreColor = project.cardForeColor;
+          final defaultFore = Theme.of(context).colorScheme.onSurface;
+          final iconColor = foreColor ?? defaultFore;
+          final subtitleColor =
+              (foreColor ?? Theme.of(context).colorScheme.onSurfaceVariant)
+                  .withValues(alpha: 0.75);
           return ListTile(
+            tileColor: backColor,
             leading: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Icon(Icons.folder_outlined),
+                Icon(Icons.folder_outlined, color: iconColor),
                 if (project.isDirty) ...[
                   const SizedBox(width: 4),
                   Container(
@@ -609,15 +619,21 @@ class _HomeScreenState extends State<HomeScreen>
                 ],
               ],
             ),
-            title: Text(project.name),
+            title: Text(
+              project.name,
+              style: foreColor != null ? TextStyle(color: foreColor) : null,
+            ),
             subtitle: Text(
               _formatDate(project.lastModifiedAt),
-              style: Theme.of(context).textTheme.bodySmall,
+              style: Theme.of(context)
+                  .textTheme
+                  .bodySmall
+                  ?.copyWith(color: subtitleColor),
             ),
             trailing: readOnly
-                ? const Icon(Icons.lock_outline, size: 16, color: Colors.grey)
+                ? Icon(Icons.lock_outline, size: 16, color: iconColor)
                 : PopupMenuButton<String>(
-                    icon: const Icon(Icons.more_vert),
+                    icon: Icon(Icons.more_vert, color: iconColor),
                     onSelected: (value) {
                       if (value == 'rename') _renameProject(project);
                       if (value == 'delete') _deleteProject(project);

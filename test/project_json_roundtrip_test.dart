@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:ui' show Color;
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:manidoc_mobile/models/manidoc_node.dart';
@@ -68,6 +69,31 @@ void main() {
     expect(saved['name'], '改名した');
     expect((saved['rootNodes'] as List).length, 2);
     expect(saved['cardBackColor'], '#1e88e5');
+  });
+
+  test('タイル色は Color として読める（一覧の行の色に使う）', () {
+    final project =
+        ManidocProject.fromJson(jsonDecode(desktopJson) as Map<String, dynamic>);
+    // #1e88e5 / #ffffff（アルファ無しは不透明扱い）
+    expect(project.cardBackColor, const Color(0xFF1E88E5));
+    expect(project.cardForeColor, const Color(0xFFFFFFFF));
+  });
+
+  test('タイル色が無いプロジェクトは null（既定色にフォールバック）', () {
+    final project = ManidocProject.create('色なし');
+    expect(project.cardBackColor, isNull);
+    expect(project.cardForeColor, isNull);
+  });
+
+  test('壊れたタイル色は null として扱う', () {
+    final project = ManidocProject.fromJson({
+      'name': 'こわれた色',
+      'rootNodes': <dynamic>[],
+      'cardBackColor': 'not-a-color',
+      'cardForeColor': '#12',
+    });
+    expect(project.cardBackColor, isNull);
+    expect(project.cardForeColor, isNull);
   });
 
   test('project.colors.json のような別用途のJSONはプロジェクトと見なさない', () {

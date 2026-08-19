@@ -1,3 +1,4 @@
+import 'package:flutter/painting.dart' show Color;
 import 'package:uuid/uuid.dart';
 import 'manidoc_node.dart';
 
@@ -96,6 +97,25 @@ class ManidocProject {
         extra: Map<String, dynamic>.from(json)
           ..removeWhere((key, _) => _knownKeys.contains(key)),
       );
+
+  /// デスクトップ版が付けるタイルの背景色（cardBackColor）。無ければ null。
+  Color? get cardBackColor => _parseColor(extra['cardBackColor']);
+
+  /// デスクトップ版が付けるタイルの文字色（cardForeColor）。無ければ null。
+  Color? get cardForeColor => _parseColor(extra['cardForeColor']);
+
+  /// "#rrggbb" / "#aarrggbb"（先頭の # は任意）を [Color] に変換する。
+  /// 形式が想定外なら null を返して既定色にフォールバックさせる。
+  static Color? _parseColor(dynamic value) {
+    if (value is! String) return null;
+    var hex = value.trim();
+    if (hex.startsWith('#')) hex = hex.substring(1);
+    if (hex.length == 6) hex = 'ff$hex'; // アルファ無しは不透明扱い
+    if (hex.length != 8) return null;
+    final argb = int.tryParse(hex, radix: 16);
+    if (argb == null) return null;
+    return Color(argb);
+  }
 
   /// プロジェクトJSONかどうか(rootNodes を持つか)。
   /// ワークスペース直下には project.colors.json のような別用途のJSONも置かれるため、
