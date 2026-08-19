@@ -1,4 +1,4 @@
-import 'package:flutter/painting.dart' show Color;
+import 'dart:ui' show Color;
 import 'package:uuid/uuid.dart';
 import 'manidoc_node.dart';
 
