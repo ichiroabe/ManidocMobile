@@ -9,6 +9,7 @@ import '../models/tag_definition.dart';
 import '../models/workspace_info.dart';
 import '../services/color_utils.dart';
 import '../services/drive_service.dart';
+import '../services/html_import.dart';
 import '../services/local_cache_service.dart';
 import '../services/local_storage_service.dart';
 import '../services/sync_service.dart';
@@ -308,14 +309,22 @@ class _HomeScreenState extends State<HomeScreen>
 
     if (name == null || name.isEmpty) return;
 
-    final project = ManidocProject.create(name);
+    await _saveNewProject(ManidocProject.create(name));
+  }
 
+  /// 作成済み・取り込み済みのプロジェクトをワークスペースへ保存する。
+  /// 新規作成・Webインポートで共通。[open] が true なら保存後に開く。
+  Future<void> _saveNewProject(ManidocProject project,
+      {bool open = false}) async {
     if (_isWindows) {
       final path = widget.workspace.localPath;
       if (path == null) return;
       final ok = await _localService.createProject(project, path);
       if (!mounted) return;
-      if (ok) _loadLocal();
+      if (ok) {
+        _loadLocal();
+        if (open) _openProject(project);
+      }
     } else {
       // 新規プロジェクトはワークスペース直下に作る（デスクトップ版と同じ場所）
       final workspaceFolderId = widget.workspace.windowsFolderId;
@@ -333,6 +342,7 @@ class _HomeScreenState extends State<HomeScreen>
         await _cacheService.saveProject(
             widget.workspace, SyncService.workspaceType, project);
         _syncFromDrive();
+        if (open) _openProject(project);
       } else {
         // ワークスペースに書けなかった: 端末内にだけ残して次の同期に回す
         project.isDirty = true;
@@ -349,7 +359,60 @@ class _HomeScreenState extends State<HomeScreen>
             duration: Duration(seconds: 5),
           ),
         );
+        if (open) _openProject(project);
       }
+    }
+  }
+
+  /// 🌐 WebページのURLを取り込んでプロジェクト化する（openManidoc 準拠）。
+  /// 見出し(h1〜h6)を階層ノードに、本文をMarkdown風の記事に変換する。
+  Future<void> _importWeb() async {
+    final controller = TextEditingController(text: 'https://');
+    final url = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Webページを取り込む'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          keyboardType: TextInputType.url,
+          decoration: const InputDecoration(
+            labelText: 'URL',
+            border: OutlineInputBorder(),
+          ),
+          onSubmitted: (v) => Navigator.pop(ctx, v.trim()),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('キャンセル'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, controller.text.trim()),
+            child: const Text('取り込む'),
+          ),
+        ],
+      ),
+    );
+    WidgetsBinding.instance.addPostFrameCallback((_) => controller.dispose());
+    if (!mounted || url == null || url.isEmpty || url == 'https://') return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('取り込んでいます…'), duration: Duration(seconds: 3)),
+    );
+    try {
+      final project = await HtmlImport.importUrl(url);
+      if (!mounted) return;
+      await _saveNewProject(project, open: true);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('「${project.name}」を取り込みました')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('取り込みに失敗しました: $e')),
+      );
     }
   }
 
@@ -1188,6 +1251,11 @@ class _HomeScreenState extends State<HomeScreen>
           ),
         ),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.cloud_download_outlined),
+            tooltip: 'Webインポート',
+            onPressed: _importWeb,
+          ),
           if (!_isWindows || widget.workspace.localPath != null)
             IconButton(
               icon: const Icon(Icons.style_outlined),
