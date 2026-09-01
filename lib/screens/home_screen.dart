@@ -1087,29 +1087,47 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  /// 🏷 タグのチップ。タグに色が定義されていればそれを使い、
-  /// 無ければタイルの文字色、さらに無ければテーマ色で表示する。
+  /// 🏷 タグのチップ。
+  /// タグに色が定義されていれば「背景=タグ色 / 文字=コントラストの高い白か黒」の
+  /// ベタ塗りにする。こうしないとタイル背景色がタグ色と同じ場合に文字が埋もれて
+  /// タグ名が見えなくなる。色が無ければタイルの文字色・テーマ色に馴染ませる。
   Widget _buildTagChip(
       BuildContext context, ManidocProject project, Color? foreColor) {
     final scheme = Theme.of(context).colorScheme;
-    final base = _tagColor(project.tag.trim()) ?? foreColor ?? scheme.primary;
+    final tagColor = _tagColor(project.tag.trim());
+    final Color bg;
+    final Color fg;
+    if (tagColor != null) {
+      // ベタ塗り: タイル背景と同色でも必ず読める
+      bg = tagColor;
+      fg = contrastForegroundFor(tagColor);
+    } else {
+      // 色未定義: タイルの文字色（無ければテーマ色）に薄く馴染ませる
+      final base = foreColor ?? scheme.primary;
+      bg = base.withValues(alpha: 0.15);
+      fg = foreColor ?? scheme.onSurface;
+    }
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
       decoration: BoxDecoration(
-        color: base.withValues(alpha: 0.15),
+        color: bg,
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: base.withValues(alpha: 0.5)),
+        border: Border.all(
+          color: tagColor != null
+              ? fg.withValues(alpha: 0.25)
+              : (foreColor ?? scheme.primary).withValues(alpha: 0.5),
+        ),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.local_offer, size: 11, color: base),
+          Icon(Icons.local_offer, size: 11, color: fg),
           const SizedBox(width: 4),
           Flexible(
             child: Text(
               project.tag.trim(),
               overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontSize: 11, color: base),
+              style: TextStyle(fontSize: 11, color: fg),
             ),
           ),
         ],
