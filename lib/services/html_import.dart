@@ -15,6 +15,12 @@ import '../models/manidoc_project.dart';
 /// 表示は http(s) の画像URLをそのまま Image.network で描画できるため、
 /// 画像は解決した絶対URLを imagePath / 本文にそのまま入れる（ダウンロード不要）。
 class HtmlImport {
+  /// テーブルセルをMarkdownの表に安全に収める。
+  /// 改行・連続空白は1つの空白へ潰し、区切り文字 `|` はエスケープする
+  /// (どちらも表のレイアウトを壊すため)。
+  static String _mdCell(String s) =>
+      s.trim().replaceAll(RegExp(r'\s+'), ' ').replaceAll('|', r'\|');
+
   /// WebページのURLをプロジェクト化する。
   static Future<ManidocProject> importUrl(String url) async {
     final response =
@@ -135,12 +141,21 @@ class HtmlImport {
           case 'pre':
             buffer.writeln('```\n${child.text.trimRight()}\n```\n');
           case 'table':
+            var headerDone = false;
             for (final row in child.querySelectorAll('tr')) {
               final cells = row
                   .querySelectorAll('th,td')
-                  .map((c) => c.text.trim())
+                  .map((c) => _mdCell(c.text))
                   .toList();
+              if (cells.isEmpty) continue;
               buffer.writeln('| ${cells.join(' | ')} |');
+              // Markdownの表はヘッダー行の直後に区切り行(| --- |)が必須。
+              // これが無いと表として描画されずパイプが文字のまま表示される。
+              if (!headerDone) {
+                buffer.writeln(
+                    '| ${List.filled(cells.length, '---').join(' | ')} |');
+                headerDone = true;
+              }
             }
             buffer.writeln();
           case 'img':

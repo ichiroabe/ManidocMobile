@@ -50,4 +50,45 @@ void main() {
     expect(project.rootNodes, isNotEmpty);
     expect(project.rootNodes.first.article, contains('見出しのない本文'));
   });
+
+  test('table はヘッダー直後に区切り行を入れたMarkdown表になる', () {
+    const html = '''
+<html><body>
+<h1>T</h1>
+<table>
+  <tr><th>モデル</th><th>メモリ</th></tr>
+  <tr><td>7B</td><td>5〜8 GB</td></tr>
+</table>
+</body></html>
+''';
+    final project = HtmlImport.parseHtml(html, fallbackName: 'x');
+    final article = project.rootNodes.single.article;
+    // ヘッダー行の直後に区切り行(| --- | --- |)が必須。これが無いと
+    // Markdownの表として描画されない(修正前のバグ)。
+    expect(article, contains('| モデル | メモリ |'));
+    expect(article, contains('| --- | --- |'));
+    final headerIdx = article.indexOf('| モデル | メモリ |');
+    final sepIdx = article.indexOf('| --- | --- |');
+    final dataIdx = article.indexOf('| 7B | 5〜8 GB |');
+    expect(headerIdx, lessThan(sepIdx));
+    expect(sepIdx, lessThan(dataIdx));
+  });
+
+  test('table のセル内の | と改行は表を壊さないよう整形される', () {
+    const html = '''
+<html><body>
+<h1>T</h1>
+<table>
+  <tr><th>A</th><th>B</th></tr>
+  <tr><td>x | y</td><td>line1
+line2</td></tr>
+</table>
+</body></html>
+''';
+    final project = HtmlImport.parseHtml(html, fallbackName: 'x');
+    final article = project.rootNodes.single.article;
+    expect(article, contains(r'x \| y'));
+    expect(article, contains('| line1 line2 |'));
+    expect(article, isNot(contains('line1\nline2')));
+  });
 }
